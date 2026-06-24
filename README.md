@@ -48,7 +48,15 @@ export OPENAI_BASE_URL=http://127.0.0.1:8787/v1
 # measure token savings (+ lossless no-regression check) over the built-in corpus or your own
 parsimony eval                       # built-in samples
 parsimony eval benchmarks/samples.jsonl
+parsimony eval --record              # also persist the gate result for `stats`
+
+# aggregated per-stage reduction + accuracy (live invariant pass-rate + eval gates)
+parsimony stats                      # or GET http://127.0.0.1:8787/__parsimony__/stats
 ```
+
+While serving, each turn's per-stage reduction and accuracy (the model-free invariant
+pass-rate) are recorded; `parsimony stats` and the `/__parsimony__/stats` JSON endpoint report
+them alongside the offline eval-gate scores.
 
 From a phone/other tailnet device: `http://<host>:8787` (MagicDNS name). Note: to serve both
 loopback and the tailnet IP simultaneously in M1, run one instance per bind address (single-process

@@ -50,7 +50,20 @@ from parsimony.redact import Redactor
 __all__ = ["build_app", "build_engine", "main"]
 
 
-def build_engine(settings: Settings) -> ProxyEngine:
+def _build_metrics(settings: Settings) -> tuple[MetricsSink, SqliteMetricsSink | None]:
+    """Return the engine's metrics sink and the persistent store (if metrics are enabled).
+
+    The store is returned separately so it can also back the stats endpoint.
+    """
+    if not settings.metrics:
+        return NullSink(), None
+    if settings.metrics_path != ":memory:":
+        Path(settings.metrics_path).parent.mkdir(parents=True, exist_ok=True)
+    store = SqliteMetricsSink(settings.metrics_path)
+    return MultiSink([LoggingSink(), store]), store
+
+
+def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> ProxyEngine:
     """Construct the engine with concrete adapters chosen from ``settings``."""
     passes: list[CompressorPort] = []
     if settings.lossless:
@@ -76,13 +89,7 @@ def build_engine(settings: Settings) -> ProxyEngine:
         enabled=settings.cache,
         ttl_seconds=settings.cache_ttl_seconds,
     )
-    metrics: MetricsSink
-    if settings.metrics:
-        if settings.metrics_path != ":memory:":
-            Path(settings.metrics_path).parent.mkdir(parents=True, exist_ok=True)
-        metrics = MultiSink([LoggingSink(), SqliteMetricsSink(settings.metrics_path)])
-    else:
-        metrics = NullSink()
+    metrics_sink = metrics if metrics is not None else _build_metrics(settings)[0]
     memory = GraphMemory() if settings.memory else None
     return ProxyEngine(
         upstream=HttpxUpstream(),
@@ -104,14 +111,17 @@ def build_engine(settings: Settings) -> ProxyEngine:
             memory_summary_items=settings.memory_summary_items,
             memory_min_messages=settings.memory_min_messages,
         ),
-        metrics=metrics,
+        metrics=metrics_sink,
         memory=memory,
     )
 
 
 def build_app(settings: Settings | None = None) -> FastAPI:
     """Build the ASGI app from settings (defaults read from the environment)."""
-    return create_app(build_engine(settings or Settings()))
+    settings = settings or Settings()
+    metrics_sink, store = _build_metrics(settings)
+    engine = build_engine(settings, metrics=metrics_sink)
+    return create_app(engine, stats_source=store)
 
 
 def _parser() -> argparse.ArgumentParser:

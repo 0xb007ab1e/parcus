@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import httpx
 from fastapi import FastAPI, Request, Response
@@ -24,6 +24,19 @@ from parsimony.proxy.engine import (
     _DROP_RESPONSE_HEADERS,
     ProxyEngine,
 )
+
+# Reserved local path the proxy answers itself (JSON metrics) instead of forwarding upstream.
+_STATS_PATH = "/__parsimony__/stats"
+
+
+@runtime_checkable
+class StatsSource(Protocol):
+    """Anything that can produce an aggregate metrics snapshot for the stats endpoint."""
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return the aggregate metrics snapshot."""
+        ...
+
 
 __all__ = ["create_app"]
 
@@ -89,13 +102,20 @@ async def _stream_passthrough(
     )
 
 
-def create_app(engine: ProxyEngine, *, stream_client: httpx.AsyncClient | None = None) -> FastAPI:
+def create_app(
+    engine: ProxyEngine,
+    *,
+    stream_client: httpx.AsyncClient | None = None,
+    stats_source: StatsSource | None = None,
+) -> FastAPI:
     """Build the proxy ASGI app around an injected engine.
 
     Args:
         engine: The orchestration engine (its upstream adapter handles non-streaming calls).
         stream_client: Optional injected httpx client for the streaming path (tests); when
             omitted one is created and owned by the app lifespan.
+        stats_source: Optional metrics source; when given, ``GET /__parsimony__/stats`` returns
+            its JSON snapshot (handled locally, never forwarded upstream).
 
     Returns:
         A configured :class:`fastapi.FastAPI` application.
@@ -118,6 +138,9 @@ def create_app(engine: ProxyEngine, *, stream_client: httpx.AsyncClient | None =
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     )
     async def proxy(request: Request) -> Response:
+        if request.url.path == _STATS_PATH:
+            snapshot = stats_source.snapshot() if stats_source is not None else {}
+            return JSONResponse(snapshot)
         body = await request.body()
         headers = list(request.headers.items())
         if _is_stream(body):
