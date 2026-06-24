@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from parsimony.compress import LosslessCompressor
 from parsimony.eval.dataset import Sample
 from parsimony.eval.equivalence import is_lossless_equivalent
 from parsimony.eval.metrics import EvalReport, SampleResult
+from parsimony.model import CanonicalRequest
 from parsimony.ports import CompressorPort, TokenizerPort
 from parsimony.proxy.dialects import parse
 from parsimony.tokenize import default_tokenizer
 
 __all__ = ["evaluate"]
+
+EquivalenceCheck = Callable[[CanonicalRequest, CanonicalRequest], bool]
 
 
 def evaluate(
@@ -21,6 +24,7 @@ def evaluate(
     tokenizer: TokenizerPort | None = None,
     *,
     check_equivalence: bool = True,
+    equivalence: EquivalenceCheck | None = None,
 ) -> EvalReport:
     """Evaluate ``samples`` through ``compressor`` and return an aggregate report.
 
@@ -32,14 +36,18 @@ def evaluate(
         samples: The corpus to evaluate.
         compressor: The compressor under test (defaults to the Tier-0 lossless compressor).
         tokenizer: Token counter for measurement (defaults to the heuristic tokenizer).
-        check_equivalence: Enforce the lossless no-regression invariant (default True). Set
-            False when evaluating a lossy tier that a quality judge will score instead.
+        check_equivalence: Enforce a no-regression invariant (default True). Set False when a
+            quality judge will score the output instead.
+        equivalence: The invariant to enforce when ``check_equivalence`` is set (default the
+            lossless invariant). For the filler tier, pass an :func:`is_filler_equivalent`
+            closure bound to the allowed filler set.
 
     Returns:
         An :class:`EvalReport` aggregating per-sample results.
     """
     comp = compressor or LosslessCompressor()
     tok = tokenizer or default_tokenizer()
+    gate = equivalence or is_lossless_equivalent
     results: list[SampleResult] = []
 
     for sample in samples:
@@ -58,7 +66,7 @@ def evaluate(
         before = tok.count(canonical.text, canonical.model)
         compressed, _stats = comp.compress(canonical)
         after = tok.count(compressed.text, compressed.model)
-        equivalent = is_lossless_equivalent(canonical, compressed) if check_equivalence else True
+        equivalent = gate(canonical, compressed) if check_equivalence else True
         results.append(
             SampleResult(
                 name=sample.name,

@@ -7,7 +7,12 @@ For the always-on lossless tier, "equal quality" is enforced model-free by
 """
 
 from parsimony.eval.dataset import Sample, load_jsonl
-from parsimony.eval.equivalence import is_lossless_equivalent, lossless_violations
+from parsimony.eval.equivalence import (
+    filler_violations,
+    is_filler_equivalent,
+    is_lossless_equivalent,
+    lossless_violations,
+)
 from parsimony.eval.metrics import EvalReport, SampleResult
 from parsimony.eval.runner import evaluate
 from parsimony.eval.samples import BUILTIN_SAMPLES
@@ -18,6 +23,8 @@ __all__ = [
     "Sample",
     "SampleResult",
     "evaluate",
+    "filler_violations",
+    "is_filler_equivalent",
     "is_lossless_equivalent",
     "load_jsonl",
     "lossless_violations",

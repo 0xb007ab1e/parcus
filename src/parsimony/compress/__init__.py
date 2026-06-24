@@ -11,7 +11,15 @@ Every compressor only ever alters spans marked ``mutable`` and must fail open: o
 error it returns the request unchanged.
 """
 
+from parsimony.compress.chain import ChainCompressor
+from parsimony.compress.filler import DEFAULT_FILLERS, FillerCompressor
 from parsimony.compress.lossless import LosslessCompressor
 from parsimony.compress.null import NullCompressor
 
-__all__ = ["LosslessCompressor", "NullCompressor"]
+__all__ = [
+    "DEFAULT_FILLERS",
+    "ChainCompressor",
+    "FillerCompressor",
+    "LosslessCompressor",
+    "NullCompressor",
+]

@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from pydantic import ValidationError
 
 from parsimony import cli
+from parsimony.compress import ChainCompressor, NullCompressor
 from parsimony.config import Settings
 
 
@@ -36,6 +37,22 @@ def test_eval_command_runs_builtin_corpus(capsys: pytest.CaptureFixture[str]) ->
     out = capsys.readouterr().out
     assert "TOTAL" in out
     assert "PASS" in out
+
+
+def test_eval_filler_command_runs_builtin_corpus(capsys: pytest.CaptureFixture[str]) -> None:
+    rc = cli.main(["eval", "--filler"])
+    assert rc == 0  # built-in corpus passes the filler guardrail
+    assert "TOTAL" in capsys.readouterr().out
+
+
+def test_build_engine_chains_both_passes() -> None:
+    engine = cli.build_engine(Settings(_env_file=None, cache=False, lossless=True, filler=True))
+    assert isinstance(engine._compressor, ChainCompressor)
+
+
+def test_build_engine_uses_null_when_no_passes() -> None:
+    engine = cli.build_engine(Settings(_env_file=None, cache=False, lossless=False, filler=False))
+    assert isinstance(engine._compressor, NullCompressor)
 
 
 def test_main_requires_a_subcommand() -> None:

@@ -16,9 +16,15 @@ from fastapi import FastAPI
 
 from parsimony import __version__
 from parsimony.cache import CachePolicy, NullCache, SqliteCache
-from parsimony.compress import LosslessCompressor, NullCompressor
+from parsimony.compress import (
+    DEFAULT_FILLERS,
+    ChainCompressor,
+    FillerCompressor,
+    LosslessCompressor,
+    NullCompressor,
+)
 from parsimony.config import Settings
-from parsimony.eval import BUILTIN_SAMPLES, evaluate, load_jsonl
+from parsimony.eval import BUILTIN_SAMPLES, evaluate, is_filler_equivalent, load_jsonl
 from parsimony.ports import CachePort, CompressorPort
 from parsimony.proxy import create_app
 from parsimony.proxy.engine import EngineConfig, ProxyEngine
@@ -30,7 +36,18 @@ __all__ = ["build_app", "build_engine", "main"]
 
 def build_engine(settings: Settings) -> ProxyEngine:
     """Construct the engine with concrete adapters chosen from ``settings``."""
-    compressor: CompressorPort = LosslessCompressor() if settings.lossless else NullCompressor()
+    passes: list[CompressorPort] = []
+    if settings.lossless:
+        passes.append(LosslessCompressor())
+    if settings.filler:
+        passes.append(FillerCompressor())
+    compressor: CompressorPort
+    if not passes:
+        compressor = NullCompressor()
+    elif len(passes) == 1:
+        compressor = passes[0]
+    else:
+        compressor = ChainCompressor(passes)
     cache: CachePort
     if settings.cache:
         if settings.cache_path != ":memory:":
@@ -74,9 +91,14 @@ def _parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve", help="Run the proxy (binds loopback/tailnet only).")
     serve.add_argument("--host", default=None, help="Override bind host (never 0.0.0.0).")
     serve.add_argument("--port", type=int, default=None, help="Override bind port.")
-    ev = sub.add_parser("eval", help="Measure token savings + lossless equivalence.")
+    ev = sub.add_parser("eval", help="Measure token savings + equivalence over a dataset.")
     ev.add_argument(
         "dataset", nargs="?", default=None, help="JSONL dataset (default: built-in samples)."
+    )
+    ev.add_argument(
+        "--filler",
+        action="store_true",
+        help="Evaluate the Tier-1 filler pass (lossless+filler) with the filler guardrail.",
     )
     return parser
 
@@ -99,7 +121,14 @@ def main(argv: list[str] | None = None) -> int:
         )
     elif args.command == "eval":
         samples = load_jsonl(args.dataset) if args.dataset else BUILTIN_SAMPLES
-        report = evaluate(samples)
+        if args.filler:
+            report = evaluate(
+                samples,
+                compressor=ChainCompressor([LosslessCompressor(), FillerCompressor()]),
+                equivalence=lambda o, c: is_filler_equivalent(o, c, DEFAULT_FILLERS),
+            )
+        else:
+            report = evaluate(samples)
         print(report.render())
         return 0 if report.passed else 1
     return 0
