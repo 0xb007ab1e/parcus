@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from parsimony.memory.model import MemoryNode
-from parsimony.memory.store import InMemoryGraphStore
+from parsimony.memory.store import GraphStore
 
 __all__ = ["jaccard", "relevant"]
 
@@ -17,7 +17,7 @@ def jaccard(a: frozenset[str], b: frozenset[str]) -> float:
 
 
 def relevant(
-    store: InMemoryGraphStore,
+    store: GraphStore,
     query_terms: frozenset[str],
     *,
     limit: int = 5,

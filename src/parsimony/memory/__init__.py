@@ -10,15 +10,18 @@ from parsimony.memory.graph import GraphMemory
 from parsimony.memory.ingest import ingest_request
 from parsimony.memory.model import MemoryEdge, MemoryKind, MemoryNode, node_id
 from parsimony.memory.retrieval import jaccard, relevant
-from parsimony.memory.store import InMemoryGraphStore
+from parsimony.memory.sqlite_store import SqliteGraphStore
+from parsimony.memory.store import GraphStore, InMemoryGraphStore
 from parsimony.memory.terms import extract_terms
 
 __all__ = [
     "GraphMemory",
+    "GraphStore",
     "InMemoryGraphStore",
     "MemoryEdge",
     "MemoryKind",
     "MemoryNode",
+    "SqliteGraphStore",
     "extract_terms",
     "ingest_request",
     "jaccard",

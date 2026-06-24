@@ -8,20 +8,20 @@ extraction (entities/decisions, or a local model) plugs in behind the same shape
 from __future__ import annotations
 
 from parsimony.memory.model import MemoryEdge, MemoryKind, MemoryNode, node_id
-from parsimony.memory.store import InMemoryGraphStore
+from parsimony.memory.store import GraphStore
 from parsimony.memory.terms import extract_terms
 from parsimony.model import CanonicalRequest
 
 __all__ = ["ingest_request"]
 
 
-def _add(store: InMemoryGraphStore, kind: MemoryKind, text: str) -> str:
+def _add(store: GraphStore, kind: MemoryKind, text: str) -> str:
     identifier = node_id(kind, text)
     store.add_node(MemoryNode(id=identifier, kind=kind, text=text, terms=extract_terms(text)))
     return identifier
 
 
-def ingest_request(store: InMemoryGraphStore, request: CanonicalRequest) -> tuple[str, ...]:
+def ingest_request(store: GraphStore, request: CanonicalRequest) -> tuple[str, ...]:
     """Add nodes/edges for ``request`` to ``store`` and return the created node ids.
 
     Args:

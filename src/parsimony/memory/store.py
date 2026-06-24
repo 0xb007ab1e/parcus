@@ -6,9 +6,46 @@ retrieval logic does not change.
 
 from __future__ import annotations
 
+from typing import Protocol, runtime_checkable
+
 from parsimony.memory.model import MemoryEdge, MemoryNode
 
-__all__ = ["InMemoryGraphStore"]
+__all__ = ["GraphStore", "InMemoryGraphStore"]
+
+
+@runtime_checkable
+class GraphStore(Protocol):
+    """Storage interface for the memory graph (in-memory or persistent)."""
+
+    def add_node(self, node: MemoryNode) -> None:
+        """Insert or replace a node by id."""
+        ...
+
+    def add_edge(self, edge: MemoryEdge) -> None:
+        """Add a directed edge."""
+        ...
+
+    def get(self, node_id: str) -> MemoryNode | None:
+        """Return the node with ``node_id`` if present."""
+        ...
+
+    def nodes(self) -> tuple[MemoryNode, ...]:
+        """Return all nodes."""
+        ...
+
+    def neighbors(self, node_id: str) -> tuple[MemoryEdge, ...]:
+        """Return edges originating at ``node_id``."""
+        ...
+
+    @property
+    def node_count(self) -> int:
+        """Number of nodes."""
+        ...
+
+    @property
+    def edge_count(self) -> int:
+        """Number of edges."""
+        ...
 
 
 class InMemoryGraphStore:

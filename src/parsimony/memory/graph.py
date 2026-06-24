@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from parsimony.memory.ingest import ingest_request
 from parsimony.memory.retrieval import relevant
-from parsimony.memory.store import InMemoryGraphStore
+from parsimony.memory.store import GraphStore, InMemoryGraphStore
 from parsimony.memory.terms import extract_terms
 from parsimony.model import CanonicalRequest
 
@@ -18,18 +18,18 @@ __all__ = ["GraphMemory"]
 
 
 class GraphMemory:
-    """In-memory graph memory. Implements :class:`parsimony.ports.MemoryPort`.
+    """Graph memory over any :class:`GraphStore`. Implements :class:`parsimony.ports.MemoryPort`.
 
     Args:
         store: The backing graph store (defaults to a fresh in-memory store).
     """
 
-    def __init__(self, store: InMemoryGraphStore | None = None) -> None:
+    def __init__(self, store: GraphStore | None = None) -> None:
         """Initialise with an optional pre-existing store."""
-        self._store = store or InMemoryGraphStore()
+        self._store: GraphStore = store or InMemoryGraphStore()
 
     @property
-    def store(self) -> InMemoryGraphStore:
+    def store(self) -> GraphStore:
         """The backing graph store (for inspection/persistence)."""
         return self._store
 
