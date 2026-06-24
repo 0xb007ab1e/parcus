@@ -21,6 +21,7 @@ __all__ = [
     "CachePort",
     "ClockPort",
     "CompressorPort",
+    "MemoryPort",
     "RedactorPort",
     "TokenizerPort",
 ]
@@ -96,4 +97,22 @@ class CachePort(Protocol):
 
     def put(self, key: str, value: CachedResponse, ttl_seconds: int) -> None:
         """Store ``value`` under ``key`` with a time-to-live in seconds."""
+        ...
+
+
+@runtime_checkable
+class MemoryPort(Protocol):
+    """Read-augmenting memory over prior context (graph-backed).
+
+    ``ingest`` records a request's content; ``relevant`` retrieves the most relevant prior
+    snippets for a query. Used (in a later, eval-gated slice) to inject only the relevant
+    subgraph instead of re-sending large context, and for conversation compaction.
+    """
+
+    def ingest(self, request: CanonicalRequest) -> None:
+        """Record the request's content into memory."""
+        ...
+
+    def relevant(self, query: str, *, limit: int = 5) -> tuple[str, ...]:
+        """Return up to ``limit`` prior snippets most relevant to ``query``."""
         ...
