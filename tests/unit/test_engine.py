@@ -49,7 +49,18 @@ def _engine(upstream: FakeUpstream, **kw: object) -> ProxyEngine:
             openai_upstream="https://o.test",
             cache_enabled=bool(kw.get("cache_enabled", True)),
         ),
+        metrics=kw.get("metrics"),  # type: ignore[arg-type]
     )
+
+
+class SpySink:
+    """Records savings events for assertions."""
+
+    def __init__(self) -> None:
+        self.events: list[object] = []
+
+    def record(self, event: object) -> None:
+        self.events.append(event)
 
 
 def _anthropic(content: str, *, system: str | None = None, stream: bool = False) -> bytes:
@@ -149,3 +160,31 @@ class TestRouting:
         await eng.handle("POST", "/v1/chat/completions", [("authorization", "Bearer x")], body)
         sent = json.loads(up.last.content)
         assert sent["messages"][0]["content"] == "hi\n\n"
+
+
+class TestMetrics:
+    async def test_emits_one_savings_event_per_request(self) -> None:
+        spy = SpySink()
+        eng = _engine(FakeUpstream(), cache_enabled=False, metrics=spy)
+        await eng.handle(
+            "POST",
+            "/v1/messages",
+            [("x-request-id", "abc"), ("x-api-key", "k")],
+            _anthropic("hello   \n\n\n\n"),
+        )
+        assert len(spy.events) == 1
+        event = spy.events[0]
+        assert event.request_id == "abc"  # correlation id taken from the header
+        assert event.dialect == "anthropic"
+        assert event.canonicalized is True
+        assert event.tokens_before >= event.tokens_after
+        assert event.status_code == 200
+        assert event.duration_ms >= 0.0
+
+    async def test_generates_request_id_when_header_absent(self) -> None:
+        spy = SpySink()
+        eng = _engine(FakeUpstream(), metrics=spy)
+        await eng.handle("GET", "/v1/models", [], b"")  # unroutable -> 502, still recorded
+        assert len(spy.events) == 1
+        assert spy.events[0].status_code == 502
+        assert spy.events[0].request_id  # a non-empty generated id

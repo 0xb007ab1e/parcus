@@ -25,6 +25,7 @@ from parsimony.compress import (
 )
 from parsimony.config import Settings
 from parsimony.eval import BUILTIN_SAMPLES, evaluate, is_filler_equivalent, load_jsonl
+from parsimony.obs import LoggingSink, MetricsSink, NullSink
 from parsimony.ports import CachePort, CompressorPort
 from parsimony.proxy import create_app
 from parsimony.proxy.engine import EngineConfig, ProxyEngine
@@ -60,6 +61,7 @@ def build_engine(settings: Settings) -> ProxyEngine:
         enabled=settings.cache,
         ttl_seconds=settings.cache_ttl_seconds,
     )
+    metrics: MetricsSink = LoggingSink() if settings.metrics else NullSink()
     return ProxyEngine(
         upstream=HttpxUpstream(),
         compressor=compressor,
@@ -73,6 +75,7 @@ def build_engine(settings: Settings) -> ProxyEngine:
             cache_ttl_seconds=settings.cache_ttl_seconds,
             salt=settings.salt,
         ),
+        metrics=metrics,
     )
 
 

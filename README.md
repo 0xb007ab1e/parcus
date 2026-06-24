@@ -7,9 +7,11 @@ while **preserving the semantic meaning** the model needs to stay correct.
 > Status: **M1 complete** — a runnable proxy (Anthropic + OpenAI + pass-through), Tier-0
 > lossless compression (incl. the system prompt), an exact-hash response cache with secret
 > redaction, and a token-savings eval harness with a model-free lossless no-regression gate.
-> **M2 in progress:** Tier-1 **filler removal** is landed — opt-in (off by default), with a
-> model-free guardrail (only allow-listed filler tokens may be removed) and `parsimony eval
-> --filler`. Savings observability is next; M3+: graph memory. See [`PLAN.md`](PLAN.md).
+> **M2 complete:** Tier-1 **filler removal** — opt-in (off by default), with a model-free
+> guardrail (only allow-listed filler tokens may be removed) and `parsimony eval --filler` —
+> plus **per-request savings observability** (structured JSON logs of token/cache outcomes,
+> content-free). Next: **M3+ graph memory** (context retrieval, conversation compaction). See
+> [`PLAN.md`](PLAN.md).
 
 ## How it works
 

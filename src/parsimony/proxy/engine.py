@@ -10,12 +10,15 @@ changes a result to save tokens.
 from __future__ import annotations
 
 import json
+import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
 from parsimony.cache.key import compute_key
 from parsimony.cache.policy import CachePolicy
 from parsimony.model import CachedResponse, CanonicalRequest, Dialect
+from parsimony.obs import MetricsSink, NullSink, SavingsEvent
 from parsimony.ports import CachePort, CompressorPort, RedactorPort
 from parsimony.proxy.dialects import detect, parse, serialize
 from parsimony.proxy.upstream import UpstreamPort, UpstreamRequest, UpstreamResponse
@@ -70,14 +73,16 @@ class ProxyEngine:
         redactor: RedactorPort,
         policy: CachePolicy,
         config: EngineConfig,
+        metrics: MetricsSink | None = None,
     ) -> None:
-        """Inject the upstream adapter, optimization components, and resolved config."""
+        """Inject the upstream adapter, optimization components, resolved config, and metrics."""
         self._upstream = upstream
         self._compressor = compressor
         self._cache = cache
         self._redactor = redactor
         self._policy = policy
         self._config = config
+        self._metrics = metrics or NullSink()
 
     def route(self, dialect: Dialect, headers: list[tuple[str, str]]) -> str | None:
         """Return the upstream base URL for a request, or ``None`` if it cannot be routed."""
@@ -93,6 +98,27 @@ class ProxyEngine:
         return None
 
     async def handle(
+        self, method: str, path: str, headers: list[tuple[str, str]], body: bytes
+    ) -> ProxyResult:
+        """Process one request and emit a savings metric (best-effort) around the core handler."""
+        start = time.monotonic()
+        result = await self._handle(method, path, headers, body)
+        meta = result.meta
+        self._metrics.record(
+            SavingsEvent(
+                request_id=_request_id(headers),
+                dialect=str(meta.get("dialect", "unknown")),
+                cache=str(meta.get("cache", "off")),
+                canonicalized="tokens_before" in meta,
+                tokens_before=int(meta.get("tokens_before", 0)),
+                tokens_after=int(meta.get("tokens_after", 0)),
+                status_code=result.status_code,
+                duration_ms=(time.monotonic() - start) * 1000.0,
+            )
+        )
+        return result
+
+    async def _handle(
         self, method: str, path: str, headers: list[tuple[str, str]], body: bytes
     ) -> ProxyResult:
         """Process one buffered request end-to-end and return the result."""
@@ -212,3 +238,9 @@ def _content_type(headers: tuple[tuple[str, str], ...]) -> str | None:
         if key.lower() == "content-type":
             return value
     return None
+
+
+def _request_id(headers: list[tuple[str, str]]) -> str:
+    """Return an inbound correlation id (``x-request-id``/``x-correlation-id``) or a fresh one."""
+    lower = {k.lower(): v for k, v in headers}
+    return lower.get("x-request-id") or lower.get("x-correlation-id") or uuid.uuid4().hex
