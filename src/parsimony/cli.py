@@ -33,7 +33,14 @@ from parsimony.eval import (
     load_jsonl,
 )
 from parsimony.memory import GraphMemory
-from parsimony.obs import LoggingSink, MetricsSink, NullSink
+from parsimony.obs import (
+    LoggingSink,
+    MetricsSink,
+    MultiSink,
+    NullSink,
+    SqliteMetricsSink,
+    render_stats,
+)
 from parsimony.ports import CachePort, CompressorPort
 from parsimony.proxy import create_app
 from parsimony.proxy.engine import EngineConfig, ProxyEngine
@@ -69,7 +76,13 @@ def build_engine(settings: Settings) -> ProxyEngine:
         enabled=settings.cache,
         ttl_seconds=settings.cache_ttl_seconds,
     )
-    metrics: MetricsSink = LoggingSink() if settings.metrics else NullSink()
+    metrics: MetricsSink
+    if settings.metrics:
+        if settings.metrics_path != ":memory:":
+            Path(settings.metrics_path).parent.mkdir(parents=True, exist_ok=True)
+        metrics = MultiSink([LoggingSink(), SqliteMetricsSink(settings.metrics_path)])
+    else:
+        metrics = NullSink()
     memory = GraphMemory() if settings.memory else None
     return ProxyEngine(
         upstream=HttpxUpstream(),
@@ -125,6 +138,12 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run the memory retrieval-quality gate (recall) instead of compression eval.",
     )
+    ev.add_argument(
+        "--record",
+        action="store_true",
+        help="Record this eval's gate result into the metrics store (for `parsimony stats`).",
+    )
+    sub.add_parser("stats", help="Show aggregated per-stage reduction + accuracy from the store.")
     return parser
 
 
@@ -148,6 +167,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.retrieval:
             retrieval_report = evaluate_retrieval(BUILTIN_RETRIEVAL_SAMPLES)
             print(retrieval_report.render())
+            if args.record:
+                _record_eval("retrieval", retrieval_report.mean_score, retrieval_report.passed)
             return 0 if retrieval_report.passed else 1
         samples = load_jsonl(args.dataset) if args.dataset else BUILTIN_SAMPLES
         if args.filler:
@@ -159,8 +180,30 @@ def main(argv: list[str] | None = None) -> int:
         else:
             report = evaluate(samples)
         print(report.render())
+        if args.record:
+            # Equivalence is binary: accuracy 1.0 when the gate held, else 0.0.
+            _record_eval(
+                "filler" if args.filler else "lossless",
+                1.0 if report.passed else 0.0,
+                report.passed,
+            )
         return 0 if report.passed else 1
+    elif args.command == "stats":
+        store = SqliteMetricsSink(Settings().metrics_path)
+        try:
+            print(render_stats(store.snapshot()))
+        finally:
+            store.close()
     return 0
+
+
+def _record_eval(kind: str, score: float, passed: bool) -> None:
+    """Persist an eval-gate result to the metrics store (for `parsimony stats`)."""
+    store = SqliteMetricsSink(Settings().metrics_path)
+    try:
+        store.record_eval(kind, score, passed)
+    finally:
+        store.close()
 
 
 if __name__ == "__main__":

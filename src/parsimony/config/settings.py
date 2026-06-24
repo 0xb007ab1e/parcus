@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     redact: bool = True
     log_level: str = "INFO"
     metrics: bool = True
+    metrics_path: str = ".parsimony/metrics.sqlite"
 
     # Graph memory (off by default; compaction changes the request, so it is opt-in).
     memory: bool = False
