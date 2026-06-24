@@ -4,7 +4,7 @@ Distinct from :mod:`parsimony.eval` (offline measurement). Events carry counts/m
 never prompt or response content — and recording is best-effort (never breaks a request).
 """
 
-from parsimony.obs.events import SavingsEvent
+from parsimony.obs.events import SavingsEvent, StageStat
 from parsimony.obs.sinks import AggregateSink, LoggingSink, MetricsSink, MultiSink, NullSink
 
 __all__ = [
@@ -14,4 +14,5 @@ __all__ = [
     "MultiSink",
     "NullSink",
     "SavingsEvent",
+    "StageStat",
 ]

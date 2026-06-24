@@ -63,15 +63,26 @@ class AggregateSink:
         self._cache_hits = 0
         self._tokens_before = 0
         self._tokens_after = 0
+        # Per-stage running totals: name -> {before, after, checked, ok}.
+        self._stages: dict[str, dict[str, int]] = {}
 
     def record(self, event: SavingsEvent) -> None:
-        """Fold the event into the running totals."""
+        """Fold the event (and its per-stage breakdown) into the running totals."""
         with self._lock:
             self._requests += 1
             if event.cache == "hit":
                 self._cache_hits += 1
             self._tokens_before += event.tokens_before
             self._tokens_after += event.tokens_after
+            for stage in event.stages:
+                acc = self._stages.setdefault(
+                    stage.stage, {"before": 0, "after": 0, "checked": 0, "ok": 0}
+                )
+                acc["before"] += stage.tokens_before
+                acc["after"] += stage.tokens_after
+                if stage.ok is not None:
+                    acc["checked"] += 1
+                    acc["ok"] += 1 if stage.ok else 0
 
     def snapshot(self) -> dict[str, Any]:
         """Return a point-in-time copy of the aggregate metrics."""
@@ -87,7 +98,23 @@ class AggregateSink:
                 "tokens_after": self._tokens_after,
                 "tokens_saved": saved,
                 "overall_ratio": round(ratio, 4),
+                "stages": {name: self._stage_summary(acc) for name, acc in self._stages.items()},
             }
+
+    @staticmethod
+    def _stage_summary(acc: dict[str, int]) -> dict[str, Any]:
+        """Summarise one stage's running totals into reduction% + accuracy%."""
+        saved = acc["before"] - acc["after"]
+        reduction = saved / acc["before"] if acc["before"] > 0 else 0.0
+        accuracy = acc["ok"] / acc["checked"] if acc["checked"] > 0 else None
+        return {
+            "tokens_before": acc["before"],
+            "tokens_after": acc["after"],
+            "tokens_saved": saved,
+            "reduction": round(reduction, 4),
+            "accuracy": round(accuracy, 4) if accuracy is not None else None,
+            "checked": acc["checked"],
+        }
 
 
 class MultiSink:

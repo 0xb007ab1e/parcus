@@ -19,8 +19,8 @@ from parsimony.cache.key import compute_key
 from parsimony.cache.policy import CachePolicy
 from parsimony.memory.compaction import compact_by_summary, compact_with_memory
 from parsimony.memory.summary import ExtractiveSummarizer, Summarizer
-from parsimony.model import CachedResponse, CanonicalRequest, Dialect
-from parsimony.obs import MetricsSink, NullSink, SavingsEvent
+from parsimony.model import CachedResponse, CanonicalRequest, CompressionStats, Dialect, Role
+from parsimony.obs import MetricsSink, NullSink, SavingsEvent, StageStat
 from parsimony.ports import CachePort, CompressorPort, MemoryPort, RedactorPort, TokenizerPort
 from parsimony.proxy.dialects import detect, parse, serialize
 from parsimony.proxy.upstream import UpstreamPort, UpstreamRequest, UpstreamResponse
@@ -132,6 +132,7 @@ class ProxyEngine:
                 tokens_after=int(meta.get("tokens_after", 0)),
                 status_code=result.status_code,
                 duration_ms=(time.monotonic() - start) * 1000.0,
+                stages=tuple(meta.get("stages", ())),
             )
         )
         return result
@@ -158,11 +159,13 @@ class ProxyEngine:
         canonical = self._canonicalize(dialect, body)
         if canonical is not None:
             working, memory_action = self._apply_memory(canonical)
-            out_body, compressed = self._compress_request(working, body)
-            meta["tokens_before"] = self._tokenizer.count(canonical.text, canonical.model)
+            out_body, compressed, comp_stats = self._compress_request(working, body)
+            before = self._tokenizer.count(canonical.text, canonical.model)
+            meta["tokens_before"] = before
             meta["tokens_after"] = self._tokenizer.count(compressed.text, compressed.model)
             meta["memory"] = memory_action
             compacted = working is not canonical
+            meta["stages"] = self._stage_stats(canonical, working, compacted, comp_stats)
             # Compacted bodies depend on evolving memory state, so they are not cached.
             cache_key = None if compacted else self._maybe_cache_key(canonical)
             if cache_key is not None:
@@ -241,16 +244,50 @@ class ProxyEngine:
 
     def _compress_request(
         self, working: CanonicalRequest, original: bytes
-    ) -> tuple[bytes, CanonicalRequest]:
+    ) -> tuple[bytes, CanonicalRequest, tuple[CompressionStats, ...]]:
         """Compress + re-serialise ``working`` to outbound bytes (fail open to the original)."""
         try:
-            compressed, _stats = self._compressor.compress(working)
+            compressed, stats = self._compressor.compress(working)
             decoded = json.loads(original)
             encoded = json.dumps(serialize(compressed, decoded), ensure_ascii=False).encode("utf-8")
-            return encoded, compressed
+            return encoded, compressed, stats
         except Exception:
             # Fail open: forward the original body unchanged; report no token delta.
-            return original, working
+            return original, working, ()
+
+    def _stage_stats(
+        self,
+        canonical: CanonicalRequest,
+        working: CanonicalRequest,
+        compacted: bool,
+        comp_stats: tuple[CompressionStats, ...],
+    ) -> list[StageStat]:
+        """Build the per-stage reduction + accuracy breakdown for observability."""
+        stages: list[StageStat] = []
+        if compacted:
+            stages.append(
+                StageStat(
+                    stage="memory",
+                    tokens_before=self._tokenizer.count(canonical.text, canonical.model),
+                    tokens_after=self._tokenizer.count(working.text, working.model),
+                    ok=self._memory_structural_ok(working),
+                )
+            )
+        stages.extend(
+            StageStat(
+                stage=stat.step,
+                tokens_before=stat.tokens_before,
+                tokens_after=stat.tokens_after,
+                ok=stat.ok,
+            )
+            for stat in comp_stats
+        )
+        return stages
+
+    @staticmethod
+    def _memory_structural_ok(request: CanonicalRequest) -> bool:
+        """A model-free structural check for a memory-compacted request (Anthropic-valid shape)."""
+        return bool(request.messages) and request.messages[0].role is Role.USER
 
     def _maybe_cache_key(self, canonical: CanonicalRequest) -> str | None:
         if not self._config.cache_enabled or canonical.stream:

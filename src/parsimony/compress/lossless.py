@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 
+from parsimony.invariants import is_lossless_equivalent
 from parsimony.model import CanonicalRequest, CompressionStats, Message, Span
 from parsimony.ports import TokenizerPort
 from parsimony.spans import classify_spans
@@ -112,6 +113,7 @@ class LosslessCompressor:
                 tokens_before=before,
                 tokens_after=after,
                 spans_touched=touched,
+                ok=is_lossless_equivalent(request, new_request),  # live self-check
             )
             return new_request, (stats,)
         except Exception:

@@ -63,6 +63,7 @@ class TestSavingsEvent:
             "ratio",
             "status_code",
             "duration_ms",
+            "stages",
         }
 
 

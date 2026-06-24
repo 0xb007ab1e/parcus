@@ -119,6 +119,8 @@ class CompressionStats:
         tokens_after: Token count of the output.
         spans_touched: Number of mutable spans actually modified.
         notes: Optional human-readable detail for audit/eval.
+        ok: Result of the pass's model-free self-check (its invariant held), or ``None`` if
+            the pass does not have a runtime invariant. Drives the live accuracy metric.
     """
 
     step: str
@@ -126,6 +128,7 @@ class CompressionStats:
     tokens_after: int
     spans_touched: int = 0
     notes: tuple[str, ...] = field(default_factory=tuple)
+    ok: bool | None = None
 
     @property
     def tokens_saved(self) -> int:

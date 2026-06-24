@@ -6,10 +6,50 @@ construction (redaction-by-omission; see master §5 and ``topic-logging-observab
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["SavingsEvent"]
+__all__ = ["SavingsEvent", "StageStat"]
+
+
+@dataclass(frozen=True, slots=True)
+class StageStat:
+    """Reduction + accuracy for one pipeline stage of a request.
+
+    Args:
+        stage: Stage name (e.g. ``memory``, ``lossless``, ``filler``).
+        tokens_before: Tokens entering the stage.
+        tokens_after: Tokens leaving the stage.
+        ok: The stage's model-free invariant self-check (held = True), or ``None`` if the
+            stage has no runtime invariant (its accuracy comes from the offline eval gate).
+    """
+
+    stage: str
+    tokens_before: int
+    tokens_after: int
+    ok: bool | None = None
+
+    @property
+    def tokens_saved(self) -> int:
+        """Tokens removed by this stage (never negative)."""
+        return max(0, self.tokens_before - self.tokens_after)
+
+    @property
+    def ratio(self) -> float:
+        """Fraction of stage-input tokens removed, in ``[0.0, 1.0]`` (0 when no input)."""
+        if self.tokens_before <= 0:
+            return 0.0
+        return self.tokens_saved / self.tokens_before
+
+    def to_dict(self) -> dict[str, Any]:
+        """Render as a flat dict (counts only)."""
+        return {
+            "stage": self.stage,
+            "tokens_before": self.tokens_before,
+            "tokens_after": self.tokens_after,
+            "tokens_saved": self.tokens_saved,
+            "ok": self.ok,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +65,7 @@ class SavingsEvent:
         tokens_after: Input tokens after compression (0 when not canonicalised).
         status_code: HTTP status returned to the client.
         duration_ms: Proxy-side handling time in milliseconds.
+        stages: Per-stage reduction + accuracy breakdown (memory, lossless, filler, …).
     """
 
     request_id: str
@@ -35,6 +76,7 @@ class SavingsEvent:
     tokens_after: int
     status_code: int
     duration_ms: float
+    stages: tuple[StageStat, ...] = field(default_factory=tuple)
 
     @property
     def tokens_saved(self) -> int:
@@ -62,4 +104,5 @@ class SavingsEvent:
             "ratio": round(self.ratio, 4),
             "status_code": self.status_code,
             "duration_ms": round(self.duration_ms, 2),
+            "stages": [s.to_dict() for s in self.stages],
         }

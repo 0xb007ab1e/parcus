@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import string
 
+from parsimony.invariants import is_filler_equivalent
 from parsimony.model import CanonicalRequest, CompressionStats, Message, Span
 from parsimony.ports import TokenizerPort
 from parsimony.spans import classify_spans
@@ -124,6 +125,7 @@ class FillerCompressor:
                 tokens_before=before,
                 tokens_after=after,
                 spans_touched=touched,
+                ok=is_filler_equivalent(request, new_request, self._fillers),  # live self-check
             )
             return new_request, (stats,)
         except Exception:

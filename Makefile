@@ -41,7 +41,7 @@ cov-critical: ## Enforce 100% coverage on critical paths (transform/decision/det
 	$(PY) -m pytest -o addopts="" \
 	  --cov=parsimony.compress --cov=parsimony.model --cov=parsimony.spans \
 	  --cov=parsimony.cache.key --cov=parsimony.cache.policy --cov=parsimony.redact \
-	  --cov=parsimony.eval.equivalence --cov=parsimony.eval.quality \
+	  --cov=parsimony.invariants --cov=parsimony.eval.equivalence --cov=parsimony.eval.quality \
 	  --cov=parsimony.memory.compaction \
 	  --cov-branch --cov-fail-under=100 --cov-report=term-missing
 
