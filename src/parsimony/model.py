@@ -16,7 +16,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
-__all__ = ["CanonicalRequest", "CompressionStats", "Dialect", "Message", "Role", "Span"]
+__all__ = [
+    "CachedResponse",
+    "CanonicalRequest",
+    "CompressionStats",
+    "Dialect",
+    "Message",
+    "RedactionReport",
+    "Role",
+    "Span",
+]
 
 
 class Role(StrEnum):
@@ -132,3 +141,39 @@ class CompressionStats:
         if self.tokens_before <= 0:
             return 0.0
         return self.tokens_saved / self.tokens_before
+
+
+@dataclass(frozen=True, slots=True)
+class RedactionReport:
+    """The outcome of scanning text for secrets/PII before it is persisted or logged.
+
+    Args:
+        total: Total number of spans masked.
+        categories: Sorted, de-duplicated category names that matched (e.g. ``"api_key"``).
+    """
+
+    total: int
+    categories: tuple[str, ...] = field(default_factory=tuple)
+
+    @property
+    def has_secrets(self) -> bool:
+        """Whether any sensitive span was detected."""
+        return self.total > 0
+
+
+@dataclass(frozen=True, slots=True)
+class CachedResponse:
+    """A provider response stored for exact-match replay.
+
+    The body is stored **verbatim** so a cache hit replays the original result byte-for-byte
+    (responses are never modified). Treat the store as confidential (see the threat model).
+
+    Args:
+        status_code: HTTP status of the original response.
+        body: The raw response body bytes.
+        content_type: The original ``Content-Type``, if known.
+    """
+
+    status_code: int
+    body: bytes
+    content_type: str | None = None

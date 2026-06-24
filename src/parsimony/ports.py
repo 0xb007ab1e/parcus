@@ -10,9 +10,20 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from parsimony.model import CanonicalRequest, CompressionStats
+from parsimony.model import (
+    CachedResponse,
+    CanonicalRequest,
+    CompressionStats,
+    RedactionReport,
+)
 
-__all__ = ["ClockPort", "CompressorPort", "TokenizerPort"]
+__all__ = [
+    "CachePort",
+    "ClockPort",
+    "CompressorPort",
+    "RedactorPort",
+    "TokenizerPort",
+]
 
 
 @runtime_checkable
@@ -50,4 +61,39 @@ class ClockPort(Protocol):
 
     def now(self) -> float:
         """Return the current time as a Unix timestamp (seconds)."""
+        ...
+
+
+@runtime_checkable
+class RedactorPort(Protocol):
+    """Masks secrets/PII in text before it is persisted or logged.
+
+    Never applied to the request forwarded upstream nor to a replayed cache response (those
+    must stay verbatim); only to derived/stored/logged content.
+    """
+
+    def redact(self, text: str) -> tuple[str, RedactionReport]:
+        """Return ``text`` with sensitive spans masked, plus a report of what matched."""
+        ...
+
+    def has_secret(self, text: str) -> bool:
+        """Return whether ``text`` contains any detectable secret (for the no-cache bypass)."""
+        ...
+
+
+@runtime_checkable
+class CachePort(Protocol):
+    """An exact-match response cache keyed by a hash of the canonical request.
+
+    Implementations MUST fail open: a get/put error returns ``None``/no-ops rather than
+    raising, since the cache is a performance layer and the system must be correct when the
+    cache is empty or unavailable.
+    """
+
+    def get(self, key: str) -> CachedResponse | None:
+        """Return the cached response for ``key`` if present and unexpired, else ``None``."""
+        ...
+
+    def put(self, key: str, value: CachedResponse, ttl_seconds: int) -> None:
+        """Store ``value`` under ``key`` with a time-to-live in seconds."""
         ...
