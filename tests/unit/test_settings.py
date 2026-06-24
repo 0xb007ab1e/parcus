@@ -1,0 +1,36 @@
+"""Tests for environment-driven settings and the public-bind guard."""
+
+from __future__ import annotations
+
+import pytest
+from pydantic import ValidationError
+
+from parsimony.config import Settings
+
+
+def test_secure_defaults() -> None:
+    s = Settings(_env_file=None)
+    assert s.host == "127.0.0.1"
+    assert s.port == 8787
+    assert s.cache is True
+    assert s.lossless is True
+    assert s.filler is False  # lossy passes off by default
+    assert s.redact is True
+    assert s.tailnet_ip is None
+
+
+def test_rejects_public_bind() -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, host="0.0.0.0")  # noqa: S104
+
+
+def test_rejects_empty_bind() -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, host="")
+
+
+def test_nocache_patterns_parsing() -> None:
+    s = Settings(_env_file=None, cache_nocache_patterns="a, b ,")
+    assert s.nocache_patterns() == ["a", "b"]
+
+    assert Settings(_env_file=None).nocache_patterns() == []

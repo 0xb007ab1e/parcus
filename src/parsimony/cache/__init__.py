@@ -16,7 +16,8 @@ off-by-default mode planned for a later milestone.
 
 from parsimony.cache.clock import SystemClock
 from parsimony.cache.key import compute_key
+from parsimony.cache.null import NullCache
 from parsimony.cache.policy import CachePolicy
 from parsimony.cache.sqlite_cache import SqliteCache
 
-__all__ = ["CachePolicy", "SqliteCache", "SystemClock", "compute_key"]
+__all__ = ["CachePolicy", "NullCache", "SqliteCache", "SystemClock", "compute_key"]

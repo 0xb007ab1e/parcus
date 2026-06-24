@@ -12,5 +12,6 @@ error it returns the request unchanged.
 """
 
 from parsimony.compress.lossless import LosslessCompressor
+from parsimony.compress.null import NullCompressor
 
-__all__ = ["LosslessCompressor"]
+__all__ = ["LosslessCompressor", "NullCompressor"]

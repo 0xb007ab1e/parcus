@@ -19,9 +19,10 @@ import re
 
 from parsimony.model import CanonicalRequest, CompressionStats, Message, Span
 from parsimony.ports import TokenizerPort
+from parsimony.spans import classify_spans
 from parsimony.tokenize import default_tokenizer
 
-__all__ = ["LosslessCompressor", "normalise_whitespace"]
+__all__ = ["LosslessCompressor", "normalise_code_aware", "normalise_whitespace"]
 
 _STEP_NAME = "lossless"
 _MANY_NEWLINES = re.compile(r"\n{3,}")
@@ -30,10 +31,10 @@ _MANY_NEWLINES = re.compile(r"\n{3,}")
 def normalise_whitespace(text: str) -> str:
     """Return ``text`` with meaning-preserving whitespace removed.
 
-    Strips trailing whitespace from every line (including the final line), collapses 3+
-    newlines to one blank line, and trims leading/trailing blank lines. Interior single
-    spaces and leading indentation are preserved, so it is safe for prose and lightly
-    formatted text alike.
+    Strips trailing whitespace from every line (including the final line) and collapses runs
+    of 3+ newlines to a single blank line. Interior single spaces and leading indentation are
+    preserved. Boundary blank-line runs are *collapsed*, not fully removed — applied per span,
+    fully trimming them would merge prose into an adjacent code block and lose its separation.
 
     Args:
         text: The span text to normalise.
@@ -42,8 +43,15 @@ def normalise_whitespace(text: str) -> str:
         The normalised text (possibly identical to the input).
     """
     out = "\n".join(line.rstrip() for line in text.split("\n"))
-    out = _MANY_NEWLINES.sub("\n\n", out)
-    return out.strip("\n")
+    return _MANY_NEWLINES.sub("\n\n", out)
+
+
+def normalise_code_aware(text: str) -> str:
+    """Normalise only the prose (mutable) spans of ``text``, preserving fenced code verbatim."""
+    return "".join(
+        normalise_whitespace(span.text) if span.mutable else span.text
+        for span in classify_spans(text)
+    )
 
 
 class LosslessCompressor:
@@ -83,11 +91,18 @@ class LosslessCompressor:
                     new_spans.append(span)
                 new_messages.append(Message(role=message.role, spans=tuple(new_spans)))
 
+            new_system = request.system
+            if request.system is not None:
+                rebuilt = normalise_code_aware(request.system)
+                if rebuilt != request.system:
+                    touched += 1
+                    new_system = rebuilt
+
             new_request = CanonicalRequest(
                 dialect=request.dialect,
                 model=request.model,
                 messages=tuple(new_messages),
-                system=request.system,
+                system=new_system,
                 stream=request.stream,
                 tools_json=request.tools_json,
             )

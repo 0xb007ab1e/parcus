@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from parsimony.compress.lossless import LosslessCompressor, normalise_whitespace
+from parsimony.compress.lossless import (
+    LosslessCompressor,
+    normalise_code_aware,
+    normalise_whitespace,
+)
 from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
 
 
@@ -22,8 +26,10 @@ class TestNormaliseWhitespace:
     def test_collapses_excess_blank_lines(self) -> None:
         assert normalise_whitespace("a\n\n\n\n\nb") == "a\n\nb"
 
-    def test_trims_leading_and_trailing_blank_lines(self) -> None:
-        assert normalise_whitespace("\n\nhello\n\n") == "hello"
+    def test_collapses_blank_line_runs_including_edges(self) -> None:
+        # Boundary blank-line runs are collapsed (to one blank line), not fully removed, so
+        # prose adjacent to a code span keeps its separation.
+        assert normalise_whitespace("\n\n\n\nhello\n\n\n\n") == "\n\nhello\n\n"
 
     def test_preserves_interior_spacing_and_indentation(self) -> None:
         # Single interior spaces and leading indentation are meaning-bearing; keep them.
@@ -32,6 +38,17 @@ class TestNormaliseWhitespace:
     def test_idempotent(self) -> None:
         once = normalise_whitespace("a   \n\n\n\nb  ")
         assert normalise_whitespace(once) == once
+
+
+class TestNormaliseCodeAware:
+    def test_normalises_prose_outside_code(self) -> None:
+        assert normalise_code_aware("hi   \n\n\n\nbye   ") == "hi\n\nbye"
+
+    def test_preserves_fenced_code_verbatim(self) -> None:
+        text = "intro   \n\n\n\n```x = 1   \ny = 2   ```"
+        out = normalise_code_aware(text)
+        assert "```x = 1   \ny = 2   ```" in out  # code byte-for-byte
+        assert out.startswith("intro\n\n")
 
 
 class TestLosslessCompressor:
@@ -59,7 +76,9 @@ class TestLosslessCompressor:
             Span("def f():\n    pass   ", mutable=False),
         )
         out, stats = LosslessCompressor().compress(req)
-        assert out.messages[0].spans[0].text == "Here is code:"
+        # Boundary blank-line run collapsed to one blank line (not removed) — keeps the
+        # separation from the following immutable code span.
+        assert out.messages[0].spans[0].text == "Here is code:\n\n"
         assert out.messages[0].spans[1].text == "def f():\n    pass   "
         assert stats[0].spans_touched == 1
 
@@ -69,6 +88,18 @@ class TestLosslessCompressor:
         assert out.messages[0].spans[0].text == "already clean"
         assert stats[0].spans_touched == 0
         assert stats[0].tokens_saved == 0
+
+    def test_compresses_the_system_prompt(self) -> None:
+        req = _req(Span("hi", mutable=True), system="be terse   \n\n\n\n\nalways   ")
+        out, stats = LosslessCompressor().compress(req)
+        assert out.system == "be terse\n\nalways"
+        assert stats[0].spans_touched >= 1
+
+    def test_clean_system_is_unchanged(self) -> None:
+        req = _req(Span("clean", mutable=True), system="already clean")
+        out, stats = LosslessCompressor().compress(req)
+        assert out.system == "already clean"
+        assert stats[0].spans_touched == 0
 
     def test_fails_open_on_tokenizer_error(self) -> None:
         class _Boom:
