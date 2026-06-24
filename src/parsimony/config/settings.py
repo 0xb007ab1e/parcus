@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     metrics: bool = True
 
+    # Track B graph memory (off by default; injection changes the request, so it is opt-in).
+    memory: bool = False
+    memory_inject: bool = False
+    memory_keep_recent: int = 4
+    memory_retrieve: int = 3
+    memory_min_messages: int = 8
+
     @field_validator("host")
     @classmethod
     def _reject_public_bind(cls, value: str) -> str:

@@ -32,6 +32,7 @@ from parsimony.eval import (
     is_filler_equivalent,
     load_jsonl,
 )
+from parsimony.memory import GraphMemory
 from parsimony.obs import LoggingSink, MetricsSink, NullSink
 from parsimony.ports import CachePort, CompressorPort
 from parsimony.proxy import create_app
@@ -69,6 +70,7 @@ def build_engine(settings: Settings) -> ProxyEngine:
         ttl_seconds=settings.cache_ttl_seconds,
     )
     metrics: MetricsSink = LoggingSink() if settings.metrics else NullSink()
+    memory = GraphMemory() if settings.memory else None
     return ProxyEngine(
         upstream=HttpxUpstream(),
         compressor=compressor,
@@ -81,8 +83,14 @@ def build_engine(settings: Settings) -> ProxyEngine:
             cache_enabled=settings.cache,
             cache_ttl_seconds=settings.cache_ttl_seconds,
             salt=settings.salt,
+            memory_enabled=settings.memory,
+            memory_inject=settings.memory_inject,
+            memory_keep_recent=settings.memory_keep_recent,
+            memory_retrieve=settings.memory_retrieve,
+            memory_min_messages=settings.memory_min_messages,
         ),
         metrics=metrics,
+        memory=memory,
     )
 
 

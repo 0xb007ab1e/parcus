@@ -46,6 +46,8 @@ def _meta_headers(meta: dict[str, Any]) -> dict[str, str]:
         out["x-parsimony-cache"] = str(meta["cache"])
     if "dialect" in meta:
         out["x-parsimony-dialect"] = str(meta["dialect"])
+    if "memory" in meta:
+        out["x-parsimony-memory"] = str(meta["memory"])
     if "tokens_before" in meta and "tokens_after" in meta:
         before, after = int(meta["tokens_before"]), int(meta["tokens_after"])
         out["x-parsimony-tokens-before"] = str(before)

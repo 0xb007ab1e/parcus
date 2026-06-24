@@ -17,11 +17,13 @@ from typing import Any
 
 from parsimony.cache.key import compute_key
 from parsimony.cache.policy import CachePolicy
+from parsimony.memory.compaction import compact_with_memory
 from parsimony.model import CachedResponse, CanonicalRequest, Dialect
 from parsimony.obs import MetricsSink, NullSink, SavingsEvent
-from parsimony.ports import CachePort, CompressorPort, RedactorPort
+from parsimony.ports import CachePort, CompressorPort, MemoryPort, RedactorPort, TokenizerPort
 from parsimony.proxy.dialects import detect, parse, serialize
 from parsimony.proxy.upstream import UpstreamPort, UpstreamRequest, UpstreamResponse
+from parsimony.tokenize import default_tokenizer
 
 __all__ = ["EngineConfig", "ProxyEngine", "ProxyResult"]
 
@@ -49,6 +51,12 @@ class EngineConfig:
     cache_enabled: bool = True
     cache_ttl_seconds: int = 86_400
     salt: str = ""
+    # Track B memory (off by default). ingest builds the graph; inject compacts the request.
+    memory_enabled: bool = False
+    memory_inject: bool = False
+    memory_keep_recent: int = 4
+    memory_retrieve: int = 3
+    memory_min_messages: int = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,8 +82,10 @@ class ProxyEngine:
         policy: CachePolicy,
         config: EngineConfig,
         metrics: MetricsSink | None = None,
+        memory: MemoryPort | None = None,
+        tokenizer: TokenizerPort | None = None,
     ) -> None:
-        """Inject the upstream adapter, optimization components, resolved config, and metrics."""
+        """Inject the upstream adapter, optimization components, config, metrics, and memory."""
         self._upstream = upstream
         self._compressor = compressor
         self._cache = cache
@@ -83,6 +93,8 @@ class ProxyEngine:
         self._policy = policy
         self._config = config
         self._metrics = metrics or NullSink()
+        self._memory = memory
+        self._tokenizer = tokenizer or default_tokenizer()
 
     def route(self, dialect: Dialect, headers: list[tuple[str, str]]) -> str | None:
         """Return the upstream base URL for a request, or ``None`` if it cannot be routed."""
@@ -139,11 +151,14 @@ class ProxyEngine:
 
         canonical = self._canonicalize(dialect, body)
         if canonical is not None:
-            out_body, stats = self._compress(canonical, body)
-            if stats is not None:
-                meta["tokens_before"] = stats[0]
-                meta["tokens_after"] = stats[1]
-            cache_key = self._maybe_cache_key(canonical)
+            working, memory_action = self._apply_memory(canonical)
+            out_body, compressed = self._compress_request(working, body)
+            meta["tokens_before"] = self._tokenizer.count(canonical.text, canonical.model)
+            meta["tokens_after"] = self._tokenizer.count(compressed.text, compressed.model)
+            meta["memory"] = memory_action
+            compacted = working is not canonical
+            # Compacted bodies depend on evolving memory state, so they are not cached.
+            cache_key = None if compacted else self._maybe_cache_key(canonical)
             if cache_key is not None:
                 hit = self._cache.get(cache_key)
                 if hit is not None:
@@ -180,19 +195,44 @@ class ProxyEngine:
             return None
         return parse(dialect, decoded)
 
-    def _compress(
-        self, canonical: CanonicalRequest, original: bytes
-    ) -> tuple[bytes, tuple[int, int] | None]:
+    def _apply_memory(self, canonical: CanonicalRequest) -> tuple[CanonicalRequest, str]:
+        """Ingest into memory and optionally compact the request (fail open).
+
+        Returns the (possibly compacted) request and an action label (``off``/``ingest``/
+        ``compact``) for observability.
+        """
+        if self._memory is None or not self._config.memory_enabled:
+            return canonical, "off"
         try:
-            compressed, stats = self._compressor.compress(canonical)
-            decoded = json.loads(original)
-            new_body = serialize(compressed, decoded)
-            encoded = json.dumps(new_body, ensure_ascii=False).encode("utf-8")
-            tokens = (stats[0].tokens_before, stats[0].tokens_after) if stats else None
-            return encoded, tokens
+            self._memory.ingest(canonical)
         except Exception:
-            # Fail open: forward the original body unchanged.
-            return original, None
+            return canonical, "off"
+        if not self._config.memory_inject:
+            return canonical, "ingest"
+        try:
+            compacted = compact_with_memory(
+                canonical,
+                self._memory,
+                keep_recent=self._config.memory_keep_recent,
+                retrieve=self._config.memory_retrieve,
+                min_messages=self._config.memory_min_messages,
+            )
+        except Exception:
+            return canonical, "ingest"
+        return compacted, "compact" if compacted is not canonical else "ingest"
+
+    def _compress_request(
+        self, working: CanonicalRequest, original: bytes
+    ) -> tuple[bytes, CanonicalRequest]:
+        """Compress + re-serialise ``working`` to outbound bytes (fail open to the original)."""
+        try:
+            compressed, _stats = self._compressor.compress(working)
+            decoded = json.loads(original)
+            encoded = json.dumps(serialize(compressed, decoded), ensure_ascii=False).encode("utf-8")
+            return encoded, compressed
+        except Exception:
+            # Fail open: forward the original body unchanged; report no token delta.
+            return original, working
 
     def _maybe_cache_key(self, canonical: CanonicalRequest) -> str | None:
         if not self._config.cache_enabled or canonical.stream:
