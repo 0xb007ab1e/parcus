@@ -24,7 +24,14 @@ from parsimony.compress import (
     NullCompressor,
 )
 from parsimony.config import Settings
-from parsimony.eval import BUILTIN_SAMPLES, evaluate, is_filler_equivalent, load_jsonl
+from parsimony.eval import (
+    BUILTIN_RETRIEVAL_SAMPLES,
+    BUILTIN_SAMPLES,
+    evaluate,
+    evaluate_retrieval,
+    is_filler_equivalent,
+    load_jsonl,
+)
 from parsimony.obs import LoggingSink, MetricsSink, NullSink
 from parsimony.ports import CachePort, CompressorPort
 from parsimony.proxy import create_app
@@ -103,6 +110,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Evaluate the Tier-1 filler pass (lossless+filler) with the filler guardrail.",
     )
+    ev.add_argument(
+        "--retrieval",
+        action="store_true",
+        help="Run the memory retrieval-quality gate (recall) instead of compression eval.",
+    )
     return parser
 
 
@@ -123,6 +135,10 @@ def main(argv: list[str] | None = None) -> int:
             log_level=settings.log_level.lower(),
         )
     elif args.command == "eval":
+        if args.retrieval:
+            retrieval_report = evaluate_retrieval(BUILTIN_RETRIEVAL_SAMPLES)
+            print(retrieval_report.render())
+            return 0 if retrieval_report.passed else 1
         samples = load_jsonl(args.dataset) if args.dataset else BUILTIN_SAMPLES
         if args.filler:
             report = evaluate(

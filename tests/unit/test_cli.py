@@ -45,6 +45,12 @@ def test_eval_filler_command_runs_builtin_corpus(capsys: pytest.CaptureFixture[s
     assert "TOTAL" in capsys.readouterr().out
 
 
+def test_eval_retrieval_gate_runs(capsys: pytest.CaptureFixture[str]) -> None:
+    rc = cli.main(["eval", "--retrieval"])
+    assert rc == 0  # built-in retrieval samples pass the recall gate
+    assert "mean_recall" in capsys.readouterr().out
+
+
 def test_build_engine_chains_both_passes() -> None:
     engine = cli.build_engine(Settings(_env_file=None, cache=False, lossless=True, filler=True))
     assert isinstance(engine._compressor, ChainCompressor)

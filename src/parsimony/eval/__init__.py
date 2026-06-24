@@ -14,15 +14,30 @@ from parsimony.eval.equivalence import (
     lossless_violations,
 )
 from parsimony.eval.metrics import EvalReport, SampleResult
+from parsimony.eval.quality import KeywordRecallJudge, LLMJudge, QualityJudge, QualityVerdict
+from parsimony.eval.retrieval import (
+    BUILTIN_RETRIEVAL_SAMPLES,
+    RetrievalReport,
+    RetrievalSample,
+    evaluate_retrieval,
+)
 from parsimony.eval.runner import evaluate
 from parsimony.eval.samples import BUILTIN_SAMPLES
 
 __all__ = [
+    "BUILTIN_RETRIEVAL_SAMPLES",
     "BUILTIN_SAMPLES",
     "EvalReport",
+    "KeywordRecallJudge",
+    "LLMJudge",
+    "QualityJudge",
+    "QualityVerdict",
+    "RetrievalReport",
+    "RetrievalSample",
     "Sample",
     "SampleResult",
     "evaluate",
+    "evaluate_retrieval",
     "filler_violations",
     "is_filler_equivalent",
     "is_lossless_equivalent",
