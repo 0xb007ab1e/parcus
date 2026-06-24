@@ -15,9 +15,11 @@ from typing import Any, Protocol, runtime_checkable
 
 import httpx
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
+from parsimony import __version__
+from parsimony.obs import render_prometheus
 from parsimony.proxy.dialects import detect
 from parsimony.proxy.engine import (
     _DROP_REQUEST_HEADERS,
@@ -25,8 +27,10 @@ from parsimony.proxy.engine import (
     ProxyEngine,
 )
 
-# Reserved local path the proxy answers itself (JSON metrics) instead of forwarding upstream.
+# Reserved local paths the proxy answers itself (never forwarded upstream).
 _STATS_PATH = "/__parsimony__/stats"
+_HEALTH_PATH = "/__parsimony__/health"
+_METRICS_PATH = "/__parsimony__/metrics"
 
 
 @runtime_checkable
@@ -138,9 +142,14 @@ def create_app(
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     )
     async def proxy(request: Request) -> Response:
+        if request.url.path == _HEALTH_PATH:
+            return JSONResponse({"status": "ok", "version": __version__})
         if request.url.path == _STATS_PATH:
             snapshot = stats_source.snapshot() if stats_source is not None else {}
             return JSONResponse(snapshot)
+        if request.url.path == _METRICS_PATH:
+            text = render_prometheus(stats_source.snapshot()) if stats_source is not None else ""
+            return PlainTextResponse(text, media_type="text/plain; version=0.0.4")
         body = await request.body()
         headers = list(request.headers.items())
         if _is_stream(body):

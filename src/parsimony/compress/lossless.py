@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 
+from parsimony.compress.sampling import VerifySampler
 from parsimony.invariants import is_lossless_equivalent
 from parsimony.model import CanonicalRequest, CompressionStats, Message, Span
 from parsimony.ports import TokenizerPort
@@ -62,11 +63,16 @@ class LosslessCompressor:
 
     Args:
         tokenizer: Token counter used to measure savings. Defaults to the heuristic tokenizer.
+        verify_sample: Fraction of calls on which to run the invariant self-check (default 1.0
+            = always). Lower it to trim per-request overhead at high throughput.
     """
 
-    def __init__(self, tokenizer: TokenizerPort | None = None) -> None:
-        """Initialise the compressor with an optional token counter."""
+    def __init__(
+        self, tokenizer: TokenizerPort | None = None, *, verify_sample: float = 1.0
+    ) -> None:
+        """Initialise the compressor with an optional token counter and self-check sampler."""
         self._tokenizer = tokenizer or default_tokenizer()
+        self._sampler = VerifySampler(verify_sample)
 
     def compress(
         self, request: CanonicalRequest
@@ -113,7 +119,11 @@ class LosslessCompressor:
                 tokens_before=before,
                 tokens_after=after,
                 spans_touched=touched,
-                ok=is_lossless_equivalent(request, new_request),  # live self-check
+                ok=(
+                    is_lossless_equivalent(request, new_request)  # live self-check (sampled)
+                    if self._sampler.should_verify()
+                    else None
+                ),
             )
             return new_request, (stats,)
         except Exception:

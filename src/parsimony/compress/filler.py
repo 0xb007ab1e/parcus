@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import string
 
+from parsimony.compress.sampling import VerifySampler
 from parsimony.invariants import is_filler_equivalent
 from parsimony.model import CanonicalRequest, CompressionStats, Message, Span
 from parsimony.ports import TokenizerPort
@@ -73,16 +74,20 @@ class FillerCompressor:
     Args:
         fillers: The allow-list of removable tokens (default :data:`DEFAULT_FILLERS`).
         tokenizer: Token counter for measurement (default heuristic).
+        verify_sample: Fraction of calls on which to run the invariant self-check (default 1.0).
     """
 
     def __init__(
         self,
         fillers: frozenset[str] | None = None,
         tokenizer: TokenizerPort | None = None,
+        *,
+        verify_sample: float = 1.0,
     ) -> None:
-        """Initialise with an optional custom filler set and tokenizer."""
+        """Initialise with an optional custom filler set, tokenizer, and self-check sampler."""
         self._fillers = fillers if fillers is not None else DEFAULT_FILLERS
         self._tokenizer = tokenizer or default_tokenizer()
+        self._sampler = VerifySampler(verify_sample)
 
     def compress(
         self, request: CanonicalRequest
@@ -125,7 +130,11 @@ class FillerCompressor:
                 tokens_before=before,
                 tokens_after=after,
                 spans_touched=touched,
-                ok=is_filler_equivalent(request, new_request, self._fillers),  # live self-check
+                ok=(
+                    is_filler_equivalent(request, new_request, self._fillers)  # sampled
+                    if self._sampler.should_verify()
+                    else None
+                ),
             )
             return new_request, (stats,)
         except Exception:

@@ -32,7 +32,12 @@ from parsimony.eval import (
     is_filler_equivalent,
     load_jsonl,
 )
-from parsimony.memory import GraphMemory
+from parsimony.memory import (
+    EmbedderPort,
+    GraphMemory,
+    HashingEmbedder,
+    SentenceTransformerEmbedder,
+)
 from parsimony.obs import (
     LoggingSink,
     MetricsSink,
@@ -65,11 +70,12 @@ def _build_metrics(settings: Settings) -> tuple[MetricsSink, SqliteMetricsSink |
 
 def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> ProxyEngine:
     """Construct the engine with concrete adapters chosen from ``settings``."""
+    rate = settings.invariant_sample_rate
     passes: list[CompressorPort] = []
     if settings.lossless:
-        passes.append(LosslessCompressor())
+        passes.append(LosslessCompressor(verify_sample=rate))
     if settings.filler:
-        passes.append(FillerCompressor())
+        passes.append(FillerCompressor(verify_sample=rate))
     compressor: CompressorPort
     if not passes:
         compressor = NullCompressor()
@@ -149,6 +155,13 @@ def _parser() -> argparse.ArgumentParser:
         help="Run the memory retrieval-quality gate (recall) instead of compression eval.",
     )
     ev.add_argument(
+        "--embedder",
+        choices=["lexical", "hashing", "local"],
+        default="lexical",
+        help="Retrieval embedder for --retrieval: lexical (default), hashing, or local "
+        "(sentence-transformers; requires the 'embeddings' extra).",
+    )
+    ev.add_argument(
         "--record",
         action="store_true",
         help="Record this eval's gate result into the metrics store (for `parsimony stats`).",
@@ -175,7 +188,9 @@ def main(argv: list[str] | None = None) -> int:
         )
     elif args.command == "eval":
         if args.retrieval:
-            retrieval_report = evaluate_retrieval(BUILTIN_RETRIEVAL_SAMPLES)
+            retrieval_report = evaluate_retrieval(
+                BUILTIN_RETRIEVAL_SAMPLES, embedder=_embedder(args.embedder)
+            )
             print(retrieval_report.render())
             if args.record:
                 _record_eval("retrieval", retrieval_report.mean_score, retrieval_report.passed)
@@ -205,6 +220,15 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             store.close()
     return 0
+
+
+def _embedder(name: str) -> EmbedderPort | None:
+    """Map the --embedder choice to an embedder (None = lexical retrieval)."""
+    if name == "hashing":
+        return HashingEmbedder()
+    if name == "local":
+        return SentenceTransformerEmbedder()
+    return None
 
 
 def _record_eval(kind: str, score: float, passed: bool) -> None:

@@ -13,7 +13,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from parsimony.eval.quality import KeywordRecallJudge, QualityJudge
-from parsimony.memory import GraphMemory
+from parsimony.memory import EmbedderPort, GraphMemory
 from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
 
 __all__ = [
@@ -101,6 +101,7 @@ def evaluate_retrieval(
     *,
     limit: int = 5,
     judge: QualityJudge | None = None,
+    embedder: EmbedderPort | None = None,
 ) -> RetrievalReport:
     """Evaluate retrieval recall for each sample and return an aggregate report.
 
@@ -108,6 +109,8 @@ def evaluate_retrieval(
         samples: The labelled retrieval cases.
         limit: Max snippets to retrieve per query.
         judge: Quality judge (defaults to a strict keyword-recall judge).
+        embedder: Optional embedder for **semantic** retrieval; when ``None``, lexical retrieval
+            is used. Pass a local embedder to benchmark semantic vs lexical recall on the gate.
 
     Returns:
         A :class:`RetrievalReport`.
@@ -115,7 +118,7 @@ def evaluate_retrieval(
     quality = judge or KeywordRecallJudge()
     cases: list[RetrievalCase] = []
     for sample in samples:
-        memory = GraphMemory()
+        memory = GraphMemory(embedder=embedder)
         memory.ingest(_context_request(sample.context))
         retrieved = memory.relevant(sample.query, limit=limit)
         verdict = quality.judge(" ".join(retrieved), sample.must_include)
