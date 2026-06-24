@@ -6,6 +6,12 @@ optional local-embedding retrieval, conversation compaction, and engine wiring a
 eval-gated slices. See ``docs/adr/0002-graph-memory.md``.
 """
 
+from parsimony.memory.embedding import (
+    EmbedderPort,
+    HashingEmbedder,
+    SentenceTransformerEmbedder,
+    cosine,
+)
 from parsimony.memory.graph import GraphMemory
 from parsimony.memory.ingest import ingest_request
 from parsimony.memory.model import MemoryEdge, MemoryKind, MemoryNode, node_id
@@ -15,13 +21,17 @@ from parsimony.memory.store import GraphStore, InMemoryGraphStore
 from parsimony.memory.terms import extract_terms
 
 __all__ = [
+    "EmbedderPort",
     "GraphMemory",
     "GraphStore",
+    "HashingEmbedder",
     "InMemoryGraphStore",
     "MemoryEdge",
     "MemoryKind",
     "MemoryNode",
+    "SentenceTransformerEmbedder",
     "SqliteGraphStore",
+    "cosine",
     "extract_terms",
     "ingest_request",
     "jaccard",

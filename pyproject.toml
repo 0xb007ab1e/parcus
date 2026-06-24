@@ -30,6 +30,7 @@ dependencies = [
 # Optional LOCAL models — lazy, opt-in; never required for core operation.
 learned = ["llmlingua>=0.2"]
 graph = ["sqlite-vec>=0.1", "networkx>=3.3"]
+embeddings = ["sentence-transformers>=2.7"]  # local semantic retrieval (lazy, opt-in)
 dev = [
   "pytest>=8.2",
   "pytest-asyncio>=0.23",
@@ -89,6 +90,11 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 disallow_untyped_defs = true
 files = ["src", "tests"]
+
+# Optional extras have no type stubs; don't fail typing when they're absent.
+[[tool.mypy.overrides]]
+module = ["sentence_transformers.*", "sqlite_vec.*", "llmlingua.*"]
+ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------
 # pytest + coverage gates (master §4)
