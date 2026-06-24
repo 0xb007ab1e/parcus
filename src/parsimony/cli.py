@@ -18,6 +18,7 @@ from parsimony import __version__
 from parsimony.cache import CachePolicy, NullCache, SqliteCache
 from parsimony.compress import LosslessCompressor, NullCompressor
 from parsimony.config import Settings
+from parsimony.eval import BUILTIN_SAMPLES, evaluate, load_jsonl
 from parsimony.ports import CachePort, CompressorPort
 from parsimony.proxy import create_app
 from parsimony.proxy.engine import EngineConfig, ProxyEngine
@@ -73,6 +74,10 @@ def _parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve", help="Run the proxy (binds loopback/tailnet only).")
     serve.add_argument("--host", default=None, help="Override bind host (never 0.0.0.0).")
     serve.add_argument("--port", type=int, default=None, help="Override bind port.")
+    ev = sub.add_parser("eval", help="Measure token savings + lossless equivalence.")
+    ev.add_argument(
+        "dataset", nargs="?", default=None, help="JSONL dataset (default: built-in samples)."
+    )
     return parser
 
 
@@ -92,4 +97,13 @@ def main(argv: list[str] | None = None) -> int:
             port=settings.port,
             log_level=settings.log_level.lower(),
         )
+    elif args.command == "eval":
+        samples = load_jsonl(args.dataset) if args.dataset else BUILTIN_SAMPLES
+        report = evaluate(samples)
+        print(report.render())
+        return 0 if report.passed else 1
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

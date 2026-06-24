@@ -41,7 +41,11 @@ cov-critical: ## Enforce 100% coverage on critical paths (transform/decision/det
 	$(PY) -m pytest -o addopts="" \
 	  --cov=parsimony.compress --cov=parsimony.model --cov=parsimony.spans \
 	  --cov=parsimony.cache.key --cov=parsimony.cache.policy --cov=parsimony.redact \
+	  --cov=parsimony.eval.equivalence \
 	  --cov-branch --cov-fail-under=100 --cov-report=term-missing
+
+eval: ## Measure token savings + lossless equivalence over the built-in corpus
+	$(PY) -m parsimony.cli eval
 
 docs: ## Generate API docs (pdoc)
 	$(VENV)/bin/pdoc -o site parsimony

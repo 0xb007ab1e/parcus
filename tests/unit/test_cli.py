@@ -30,6 +30,14 @@ def test_serve_invokes_uvicorn_with_bind(monkeypatch: pytest.MonkeyPatch) -> Non
     assert captured["port"] == 9991
 
 
+def test_eval_command_runs_builtin_corpus(capsys: pytest.CaptureFixture[str]) -> None:
+    rc = cli.main(["eval"])
+    assert rc == 0  # built-in corpus is lossless → passes the equivalence gate
+    out = capsys.readouterr().out
+    assert "TOTAL" in out
+    assert "PASS" in out
+
+
 def test_main_requires_a_subcommand() -> None:
     with pytest.raises(SystemExit):
         cli.main([])

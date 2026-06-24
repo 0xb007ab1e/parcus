@@ -107,7 +107,12 @@ source = ["parsimony"]
 
 [tool.coverage.report]
 show_missing = true
-exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "@abstractmethod"]
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  "@abstractmethod",
+  "if __name__ == .__main__.:",
+]
 
 [tool.bandit]
 exclude_dirs = ["tests"]

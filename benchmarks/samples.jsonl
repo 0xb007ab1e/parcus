@@ -1,0 +1,3 @@
+{"name": "anthropic-verbose", "path": "/v1/messages", "body": {"model": "claude-sonnet-4-6", "system": "You are concise.   \n\n\n\n\nAvoid filler.   ", "messages": [{"role": "user", "content": "Refactor the parser.   \n\n\n\n"}]}}
+{"name": "openai-chat", "dialect": "openai", "body": {"model": "gpt-4o", "messages": [{"role": "system", "content": "Be terse.   \n\n\n\n"}, {"role": "user", "content": "List three ideas.   "}]}}
+{"name": "anthropic-code", "path": "/v1/messages", "body": {"model": "claude-sonnet-4-6", "messages": [{"role": "user", "content": "Fix this:   \n\n\n\n```py\ndef f():\n    return  1   \n```\n\n\n\nthanks   "}]}}
