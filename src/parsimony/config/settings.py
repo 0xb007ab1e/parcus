@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     memory_summary_items: int = 5
     memory_min_messages: int = 8
 
+    # Hosted/multi-tenant mode (off by default — local single-user is the default deployment).
+    # When on, the tenant is derived server-side from the inbound credential and the response
+    # cache is namespaced per tenant so tenants never share cached data.
+    multi_tenant: bool = False
+
     @field_validator("host")
     @classmethod
     def _reject_public_bind(cls, value: str) -> str:

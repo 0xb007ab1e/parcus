@@ -116,6 +116,7 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
             memory_retrieve=settings.memory_retrieve,
             memory_summary_items=settings.memory_summary_items,
             memory_min_messages=settings.memory_min_messages,
+            multi_tenant=settings.multi_tenant,
         ),
         metrics=metrics_sink,
         memory=memory,

@@ -48,6 +48,7 @@ def _engine(upstream: FakeUpstream, **kw: object) -> ProxyEngine:
             anthropic_upstream="https://a.test",
             openai_upstream="https://o.test",
             cache_enabled=bool(kw.get("cache_enabled", True)),
+            multi_tenant=bool(kw.get("multi_tenant", False)),
         ),
         metrics=kw.get("metrics"),  # type: ignore[arg-type]
     )
@@ -188,3 +189,39 @@ class TestMetrics:
         assert len(spy.events) == 1
         assert spy.events[0].status_code == 502
         assert spy.events[0].request_id  # a non-empty generated id
+
+
+class TestMultiTenantIsolation:
+    """Hosted mode: the cache is namespaced per credential-derived tenant (BOLA defence)."""
+
+    async def test_different_tenants_never_share_cache(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(up, cache=SqliteCache(), multi_tenant=True)
+        body = _anthropic("identical body across tenants")
+        # Tenant A primes the cache, then tenant B sends the SAME body with a different key.
+        a = await eng.handle("POST", "/v1/messages", [("x-api-key", "tenant-a")], body)
+        b = await eng.handle("POST", "/v1/messages", [("x-api-key", "tenant-b")], body)
+        assert a.meta["cache"] == "miss"
+        assert b.meta["cache"] == "miss"  # NOT served from tenant A's entry
+        assert up.calls == 2  # both reached upstream — no cross-tenant leak
+
+    async def test_same_tenant_still_hits_cache(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(up, cache=SqliteCache(), multi_tenant=True)
+        body = _anthropic("same tenant repeats a request")
+        first = await eng.handle("POST", "/v1/messages", [("x-api-key", "tenant-a")], body)
+        second = await eng.handle("POST", "/v1/messages", [("x-api-key", "tenant-a")], body)
+        assert first.meta["cache"] == "miss"
+        assert second.meta["cache"] == "hit"
+        assert up.calls == 1
+
+    async def test_single_tenant_mode_unaffected(self) -> None:
+        # With multi_tenant off (default), the credential does not scope the cache: a repeated
+        # body hits regardless of key — correct for the local single-principal deployment.
+        up = FakeUpstream()
+        eng = _engine(up, cache=SqliteCache(), multi_tenant=False)
+        body = _anthropic("local single user")
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "k1")], body)
+        second = await eng.handle("POST", "/v1/messages", [("x-api-key", "k2")], body)
+        assert second.meta["cache"] == "hit"
+        assert up.calls == 1

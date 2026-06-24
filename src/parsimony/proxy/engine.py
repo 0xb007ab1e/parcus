@@ -24,6 +24,7 @@ from parsimony.obs import MetricsSink, NullSink, SavingsEvent, StageStat
 from parsimony.ports import CachePort, CompressorPort, MemoryPort, RedactorPort, TokenizerPort
 from parsimony.proxy.dialects import detect, parse, serialize
 from parsimony.proxy.upstream import UpstreamPort, UpstreamRequest, UpstreamResponse
+from parsimony.tenant import derive_tenant
 from parsimony.tokenize import default_tokenizer
 
 __all__ = ["EngineConfig", "ProxyEngine", "ProxyResult"]
@@ -61,6 +62,9 @@ class EngineConfig:
     memory_retrieve: int = 3
     memory_summary_items: int = 5
     memory_min_messages: int = 8
+    # Hosted/multi-tenant mode (off by default). When on, the tenant is derived server-side from
+    # the inbound credential and folded into the cache key so tenants never share cached data.
+    multi_tenant: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +159,8 @@ class ProxyEngine:
         out_body = body
         meta: dict[str, Any] = {"dialect": dialect.value, "cache": "off"}
         cache_key: str | None = None
+        # Tenant is derived from the credential server-side (empty in single-tenant mode).
+        tenant = derive_tenant(headers, salt=self._config.salt) if self._config.multi_tenant else ""
 
         canonical = self._canonicalize(dialect, body)
         if canonical is not None:
@@ -167,7 +173,7 @@ class ProxyEngine:
             compacted = working is not canonical
             meta["stages"] = self._stage_stats(canonical, working, compacted, comp_stats)
             # Compacted bodies depend on evolving memory state, so they are not cached.
-            cache_key = None if compacted else self._maybe_cache_key(canonical)
+            cache_key = None if compacted else self._maybe_cache_key(canonical, tenant)
             if cache_key is not None:
                 hit = self._cache.get(cache_key)
                 if hit is not None:
@@ -289,13 +295,16 @@ class ProxyEngine:
         """A model-free structural check for a memory-compacted request (Anthropic-valid shape)."""
         return bool(request.messages) and request.messages[0].role is Role.USER
 
-    def _maybe_cache_key(self, canonical: CanonicalRequest) -> str | None:
+    def _maybe_cache_key(self, canonical: CanonicalRequest, tenant: str = "") -> str | None:
         if not self._config.cache_enabled or canonical.stream:
             return None
         if not self._policy.should_cache(canonical, has_secret=self._redactor.has_secret):
             return None
         try:
-            return compute_key(canonical, salt=self._config.salt)
+            # Namespace the key per tenant so one tenant can never read another's cached
+            # response (BOLA). Empty tenant (single-tenant mode) leaves the salt unchanged.
+            salt = f"{self._config.salt}|t:{tenant}" if tenant else self._config.salt
+            return compute_key(canonical, salt=salt)
         except Exception:
             return None
 
