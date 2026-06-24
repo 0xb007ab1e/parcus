@@ -1,0 +1,60 @@
+name: ci
+
+# Merge-blocking security + quality gates (master §4, workflow-cicd).
+# An errored/skipped security stage counts as a failure, not a pass (fail closed).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read   # least privilege
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      # TODO(supply-chain): pin these actions to a commit SHA (digest) before relying on CI
+      # in anger — std-supplychain requires digest pinning, not floating tags.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install (dev + graph extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,graph]"
+
+      - name: Lint (ruff)
+        run: |
+          ruff check src tests
+          ruff format --check src tests
+
+      - name: Type check (mypy strict)
+        run: mypy src
+        env:
+          MYPYPATH: src
+
+      - name: SAST (bandit)
+        run: bandit -q -r src
+
+      - name: Tests + coverage gate (>=90% line+branch)
+        run: pytest
+
+      - name: Critical-path coverage gate (100%)
+        run: |
+          pytest --cov=parsimony.compress --cov=parsimony.model \
+            --cov-branch --cov-fail-under=100 -q
+
+      - name: Dependency audit (SCA)
+        run: pip-audit
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
