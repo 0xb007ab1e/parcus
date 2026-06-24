@@ -24,7 +24,7 @@ from parsimony.obs import MetricsSink, NullSink, SavingsEvent, StageStat
 from parsimony.ports import CachePort, CompressorPort, MemoryPort, RedactorPort, TokenizerPort
 from parsimony.proxy.dialects import detect, parse, serialize
 from parsimony.proxy.upstream import UpstreamPort, UpstreamRequest, UpstreamResponse
-from parsimony.tenant import derive_tenant
+from parsimony.tenant import derive_tenant, is_authorized
 from parsimony.tokenize import default_tokenizer
 
 __all__ = ["EngineConfig", "ProxyEngine", "ProxyResult"]
@@ -65,6 +65,9 @@ class EngineConfig:
     # Hosted/multi-tenant mode (off by default). When on, the tenant is derived server-side from
     # the inbound credential and folded into the cache key so tenants never share cached data.
     multi_tenant: bool = False
+    # Optional edge authorization (hosted mode). Empty = open (provider still authenticates the
+    # forwarded credential). Non-empty = fail-closed allow-list of permitted tenant ids.
+    allowed_tenants: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,8 +162,18 @@ class ProxyEngine:
         out_body = body
         meta: dict[str, Any] = {"dialect": dialect.value, "cache": "off"}
         cache_key: str | None = None
-        # Tenant is derived from the credential server-side (empty in single-tenant mode).
-        tenant = derive_tenant(headers, salt=self._config.salt) if self._config.multi_tenant else ""
+        # Tenant is derived from the credential server-side (empty in single-tenant mode). It is
+        # also derived when an edge allow-list is configured, so authorization can be enforced.
+        scoped = self._config.multi_tenant or bool(self._config.allowed_tenants)
+        tenant = derive_tenant(headers, salt=self._config.salt) if scoped else ""
+        if not is_authorized(tenant, self._config.allowed_tenants):
+            # Fail closed: an unlisted/anonymous tenant never reaches an upstream.
+            return ProxyResult(
+                status_code=401,
+                headers=[("content-type", "application/json")],
+                content=b'{"error":"parsimony: tenant not authorized"}',
+                meta={**meta, "auth": "denied"},
+            )
 
         canonical = self._canonicalize(dialect, body)
         if canonical is not None:

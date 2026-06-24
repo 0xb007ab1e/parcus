@@ -1,8 +1,8 @@
-"""Unit tests for server-side tenant derivation."""
+"""Unit tests for server-side tenant derivation and edge authorization."""
 
 from __future__ import annotations
 
-from parsimony.tenant import ANONYMOUS_TENANT, derive_tenant
+from parsimony.tenant import ANONYMOUS_TENANT, derive_tenant, is_authorized
 
 
 def test_no_credential_is_anonymous() -> None:
@@ -44,3 +44,19 @@ def test_digest_is_opaque_and_short() -> None:
     assert "sk-secret-value" not in digest  # the raw credential never appears
     assert len(digest) == 16
     assert all(c in "0123456789abcdef" for c in digest)
+
+
+class TestIsAuthorized:
+    def test_empty_allow_list_is_open(self) -> None:
+        assert is_authorized("anytenant", frozenset()) is True
+        assert is_authorized(ANONYMOUS_TENANT, frozenset()) is True
+
+    def test_listed_tenant_passes(self) -> None:
+        assert is_authorized("abc123", frozenset({"abc123", "def456"})) is True
+
+    def test_unlisted_tenant_denied(self) -> None:
+        assert is_authorized("nope", frozenset({"abc123"})) is False
+
+    def test_anonymous_denied_when_allow_list_set(self) -> None:
+        # A non-empty allow-list is fail-closed: a credential-less request never passes.
+        assert is_authorized(ANONYMOUS_TENANT, frozenset({"abc123"})) is False

@@ -34,14 +34,28 @@ other's answer.
    before (correct for the local single-principal deployment).
 4. **`tenant.py` is a critical path** (100%-coverage gate) because it is the isolation boundary.
 
-## Scope of this slice / what's deferred
+## Edge authorization (slice 2 — delivered)
 
-This ADR covers the **isolation foundation: cache scoping**. The remaining hosted-mode slices,
-deferred to keep changes small and reviewable, are:
+On top of the provider's own authentication of the forwarded credential, hosted operators get an
+optional **fail-closed allow-list** of permitted tenant ids:
 
-- **Proxy authentication** — validate an allow-listed credential at the edge before forwarding
-  (today the proxy relays whatever credential it receives; hosted mode should authenticate the
-  caller). `topic-authn-authz`.
+- `parsimony.tenant.is_authorized(tenant, allowed)` — empty allow-list = open; non-empty = only
+  listed tenants pass (anonymous/unlisted → **401**, never forwarded). In the critical gate.
+- `EngineConfig.allowed_tenants` / `Settings.allowed_tenants` (`PARSIMONY_ALLOWED_TENANTS`,
+  comma-separated). A `model_validator` **fails fast** if it is set without `multi_tenant` (it
+  keys on the tenant id, which only exists in multi-tenant mode).
+- `parsimony tenant-id` reads a credential from `PARSIMONY_TENANT_CREDENTIAL` or stdin — **never
+  argv** (shell-history / process-table leak; lang-shell, workflow-secrets) — and prints its
+  tenant id so operators can build the allow-list without the proxy seeing raw keys at runtime.
+
+This authorizes *which principals may use this instance* and lets an operator revoke a tenant at
+the proxy without rotating the provider key — defence in depth, not a replacement for provider auth.
+
+## Scope / what's still deferred
+
+Delivered: **cache scoping** (slice 1) + **edge authorization** (slice 2). Remaining hosted-mode
+slices, deferred to keep changes small and reviewable:
+
 - **Per-tenant memory + metrics isolation** — the graph memory and metrics store are currently
   shared; before hosted memory/injection is enabled they must be tenant-scoped (a shared graph
   would leak across tenants exactly like the cache would have). Memory injection stays off by
@@ -51,8 +65,10 @@ deferred to keep changes small and reviewable, are:
 
 ## Consequences
 
-- Hosted operators get cache isolation with a one-flag opt-in and no change to local users.
+- Hosted operators get cache isolation + an edge allow-list with one-flag opt-ins and no change
+  to local users.
 - The digest is opaque and not exposed in any response header, so enabling multi-tenant mode
   does not leak which tenant served a request.
-- Until the deferred slices land, hosted mode should run with memory **off** (the default) and
-  rely on the proxy's network controls + the provider's own auth for access control.
+- Until the remaining slices land, hosted mode should run with memory **off** (the default) and
+  rely on the edge allow-list + the proxy's network controls + the provider's own auth for
+  access control.

@@ -29,7 +29,7 @@ Processes: the proxy. Data stores: the SQLite cache/graph (confidential).
 
 | # | Threat (STRIDE) | Boundary | Mitigation |
 |---|---|---|---|
-| S1 | Spoofed client on the bind address (S) | TB1 | Bind **loopback + tailnet only**, never `0.0.0.0`/public (`topic-tailnet-dev-access`); tailnet gated by Tailscale ACLs. Hosted mode adds proxy auth (deferred). |
+| S1 | Spoofed client on the bind address (S) | TB1 | Bind **loopback + tailnet only**, never `0.0.0.0`/public (`topic-tailnet-dev-access`); tailnet gated by Tailscale ACLs. Hosted mode adds an optional fail-closed **edge allow-list** of credential-derived tenant ids (401 before forwarding; ADR 0003) atop the provider's own auth. |
 | S2 | Proxy forwards to a spoofed/MitM upstream (S) | TB2 | Upstream URLs are an **allow-list** of known provider hosts; TLS verification on; no following redirects to other hosts (`topic-api-consumption`, SSRF). |
 | T1 | Tampering with request alters model result (T) | proxy | **Immutable-span** classification (code/paths/quotes/tool-JSON never altered); lossy passes gated by no-regression eval; **fail open** to original request on any doubt. |
 | T2 | Tampering with cache store on disk (T) | TB3 | Store in user-owned dir, `.gitignore`d; optional at-rest encryption (M2+); integrity via normalized-key hashing. |

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 __all__ = ["Settings"]
@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     # When on, the tenant is derived server-side from the inbound credential and the response
     # cache is namespaced per tenant so tenants never share cached data.
     multi_tenant: bool = False
+    # Optional edge authorization: comma-separated allow-list of permitted tenant ids (the
+    # digests from `parsimony tenant-id`). Empty = open. Requires multi_tenant (validated below).
+    allowed_tenants: str = ""
 
     @field_validator("host")
     @classmethod
@@ -73,6 +76,25 @@ class Settings(BaseSettings):
             )
         return value
 
+    @model_validator(mode="after")
+    def _require_multi_tenant_for_allow_list(self) -> Settings:
+        """Reject an edge allow-list without multi-tenant mode (fail fast on misconfig).
+
+        An allow-list keys on the credential-derived tenant id, which is only computed in
+        multi-tenant mode; configuring one without ``multi_tenant`` would silently deny every
+        request. Refuse to start instead.
+        """
+        if self.allowed_tenant_set() and not self.multi_tenant:
+            raise ValueError(
+                "PARSIMONY_ALLOWED_TENANTS requires PARSIMONY_MULTI_TENANT=true "
+                "(the allow-list keys on the credential-derived tenant id)"
+            )
+        return self
+
     def nocache_patterns(self) -> list[str]:
         """Return the configured no-cache regex strings (comma-separated env → list)."""
         return [p.strip() for p in self.cache_nocache_patterns.split(",") if p.strip()]
+
+    def allowed_tenant_set(self) -> frozenset[str]:
+        """Return the configured edge-authorization allow-list (comma-separated env → set)."""
+        return frozenset(t.strip() for t in self.allowed_tenants.split(",") if t.strip())

@@ -49,6 +49,7 @@ def _engine(upstream: FakeUpstream, **kw: object) -> ProxyEngine:
             openai_upstream="https://o.test",
             cache_enabled=bool(kw.get("cache_enabled", True)),
             multi_tenant=bool(kw.get("multi_tenant", False)),
+            allowed_tenants=kw.get("allowed_tenants", frozenset()),  # type: ignore[arg-type]
         ),
         metrics=kw.get("metrics"),  # type: ignore[arg-type]
     )
@@ -224,4 +225,55 @@ class TestMultiTenantIsolation:
         await eng.handle("POST", "/v1/messages", [("x-api-key", "k1")], body)
         second = await eng.handle("POST", "/v1/messages", [("x-api-key", "k2")], body)
         assert second.meta["cache"] == "hit"
+        assert up.calls == 1
+
+
+class TestEdgeAuthorization:
+    """Hosted mode: an optional allow-list authorizes callers before forwarding (fail closed)."""
+
+    async def test_listed_tenant_is_forwarded(self) -> None:
+        from parsimony.tenant import derive_tenant
+
+        up = FakeUpstream()
+        allowed = frozenset({derive_tenant([("x-api-key", "good-key")])})
+        eng = _engine(up, cache_enabled=False, multi_tenant=True, allowed_tenants=allowed)
+        result = await eng.handle(
+            "POST", "/v1/messages", [("x-api-key", "good-key")], _anthropic("hi")
+        )
+        assert result.status_code == 200
+        assert up.calls == 1
+
+    async def test_unlisted_tenant_gets_401_without_upstream(self) -> None:
+        from parsimony.tenant import derive_tenant
+
+        up = FakeUpstream()
+        allowed = frozenset({derive_tenant([("x-api-key", "good-key")])})
+        eng = _engine(up, cache_enabled=False, multi_tenant=True, allowed_tenants=allowed)
+        result = await eng.handle(
+            "POST", "/v1/messages", [("x-api-key", "bad-key")], _anthropic("hi")
+        )
+        assert result.status_code == 401
+        assert result.meta["auth"] == "denied"
+        assert up.calls == 0  # never reached the provider
+
+    async def test_anonymous_request_denied_when_allow_list_set(self) -> None:
+        # No credential header -> anonymous -> not in the allow-list -> 401 (still routable via
+        # anthropic-version), proving fail-closed behaviour.
+        up = FakeUpstream()
+        eng = _engine(
+            up, cache_enabled=False, multi_tenant=True, allowed_tenants=frozenset({"abc"})
+        )
+        result = await eng.handle(
+            "POST", "/v1/messages", [("anthropic-version", "2023-06-01")], _anthropic("hi")
+        )
+        assert result.status_code == 401
+        assert up.calls == 0
+
+    async def test_empty_allow_list_forwards_everything(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(up, cache_enabled=False, multi_tenant=True)  # no allow-list
+        result = await eng.handle(
+            "POST", "/v1/messages", [("x-api-key", "any-key")], _anthropic("hi")
+        )
+        assert result.status_code == 200
         assert up.calls == 1

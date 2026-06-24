@@ -8,6 +8,8 @@ the configuration layer refuses a public/all-interfaces bind (fail closed).
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +53,7 @@ from parsimony.proxy import create_app
 from parsimony.proxy.engine import EngineConfig, ProxyEngine
 from parsimony.proxy.upstream import HttpxUpstream
 from parsimony.redact import Redactor
+from parsimony.tenant import derive_tenant
 
 __all__ = ["build_app", "build_engine", "main"]
 
@@ -117,6 +120,7 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
             memory_summary_items=settings.memory_summary_items,
             memory_min_messages=settings.memory_min_messages,
             multi_tenant=settings.multi_tenant,
+            allowed_tenants=settings.allowed_tenant_set(),
         ),
         metrics=metrics_sink,
         memory=memory,
@@ -168,6 +172,11 @@ def _parser() -> argparse.ArgumentParser:
         help="Record this eval's gate result into the metrics store (for `parsimony stats`).",
     )
     sub.add_parser("stats", help="Show aggregated per-stage reduction + accuracy from the store.")
+    sub.add_parser(
+        "tenant-id",
+        help="Print the tenant id for a credential (read from PARSIMONY_TENANT_CREDENTIAL or "
+        "stdin, never argv) to build PARSIMONY_ALLOWED_TENANTS.",
+    )
     return parser
 
 
@@ -220,6 +229,28 @@ def main(argv: list[str] | None = None) -> int:
             print(render_stats(store.snapshot()))
         finally:
             store.close()
+    elif args.command == "tenant-id":
+        return _print_tenant_id()
+    return 0
+
+
+def _print_tenant_id() -> int:
+    """Print the tenant id for a credential, using the install salt. Returns an exit code.
+
+    The credential is read from ``PARSIMONY_TENANT_CREDENTIAL`` or, if unset, stdin — **never**
+    from argv (which would leak it into shell history / the process table; see lang-shell,
+    workflow-secrets). The salt comes from settings so the id matches what the running proxy
+    derives.
+    """
+    settings = Settings()
+    credential = os.environ.get("PARSIMONY_TENANT_CREDENTIAL") or sys.stdin.readline().strip()
+    if not credential:
+        print(
+            "no credential provided (set PARSIMONY_TENANT_CREDENTIAL or pipe it on stdin)",
+            file=sys.stderr,
+        )
+        return 1
+    print(derive_tenant([("x-api-key", credential)], salt=settings.salt))
     return 0
 
 

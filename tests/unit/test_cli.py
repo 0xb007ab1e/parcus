@@ -93,3 +93,27 @@ def test_main_requires_a_subcommand() -> None:
 def test_serve_rejects_public_bind() -> None:
     with pytest.raises(ValidationError):
         cli.main(["serve", "--host", "0.0.0.0"])  # noqa: S104
+
+
+def test_tenant_id_from_env_matches_derivation(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from parsimony.tenant import derive_tenant
+
+    monkeypatch.setenv("PARSIMONY_TENANT_CREDENTIAL", "sk-live-key")
+    monkeypatch.delenv("PARSIMONY_SALT", raising=False)
+    rc = cli.main(["tenant-id"])
+    assert rc == 0
+    printed = capsys.readouterr().out.strip()
+    assert printed == derive_tenant([("x-api-key", "sk-live-key")], salt="")
+    assert "sk-live-key" not in printed  # the raw credential is never echoed
+
+
+def test_tenant_id_missing_credential_fails(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("PARSIMONY_TENANT_CREDENTIAL", raising=False)
+    monkeypatch.setattr("sys.stdin.readline", lambda: "")  # empty stdin
+    rc = cli.main(["tenant-id"])
+    assert rc == 1
+    assert "no credential" in capsys.readouterr().err

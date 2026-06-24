@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import hashlib
 
-__all__ = ["ANONYMOUS_TENANT", "derive_tenant"]
+__all__ = ["ANONYMOUS_TENANT", "derive_tenant", "is_authorized"]
 
 # Used when multi-tenant mode is on but the request carries no recognised credential. Such
 # requests share one bucket rather than leaking into a credentialed tenant's namespace.
@@ -55,3 +55,26 @@ def derive_tenant(headers: list[tuple[str, str]], *, salt: str = "") -> str:
             digest = hashlib.sha256(f"{salt}|{credential}".encode()).hexdigest()
             return digest[:_DIGEST_LEN]
     return ANONYMOUS_TENANT
+
+
+def is_authorized(tenant: str, allowed: frozenset[str]) -> bool:
+    """Return whether a derived tenant may use the proxy (edge authorization, fail-closed).
+
+    Optional defence-in-depth on top of the provider's own authentication of the forwarded
+    credential: it lets a hosted operator restrict (and revoke) *which* principals may use this
+    instance without rotating provider keys.
+
+    Args:
+        tenant: The tenant id from :func:`derive_tenant`.
+        allowed: The configured allow-list of permitted tenant ids.
+
+    Returns:
+        ``True`` if ``allowed`` is empty (no edge restriction — open; the provider still
+        authenticates the forwarded credential), otherwise ``True`` only when ``tenant`` is a
+        member. A non-empty allow-list is **fail-closed**: an unlisted or anonymous tenant is
+        denied. Membership compares non-secret digests, so it need not be constant-time — an
+        attacker still cannot produce a listed id without holding the matching credential.
+    """
+    if not allowed:
+        return True
+    return tenant in allowed

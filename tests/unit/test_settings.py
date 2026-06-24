@@ -34,3 +34,20 @@ def test_nocache_patterns_parsing() -> None:
     assert s.nocache_patterns() == ["a", "b"]
 
     assert Settings(_env_file=None).nocache_patterns() == []
+
+
+def test_allowed_tenants_parsing() -> None:
+    s = Settings(_env_file=None, multi_tenant=True, allowed_tenants="abc, def ,")
+    assert s.allowed_tenant_set() == frozenset({"abc", "def"})
+    assert Settings(_env_file=None).allowed_tenant_set() == frozenset()
+
+
+def test_allow_list_without_multi_tenant_is_rejected() -> None:
+    # Fail fast: an allow-list keys on the tenant id, which only exists in multi-tenant mode.
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, allowed_tenants="abc", multi_tenant=False)
+
+
+def test_allow_list_with_multi_tenant_is_accepted() -> None:
+    s = Settings(_env_file=None, allowed_tenants="abc", multi_tenant=True)
+    assert s.allowed_tenant_set() == frozenset({"abc"})
