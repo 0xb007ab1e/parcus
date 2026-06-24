@@ -17,7 +17,8 @@ from typing import Any
 
 from parsimony.cache.key import compute_key
 from parsimony.cache.policy import CachePolicy
-from parsimony.memory.compaction import compact_with_memory
+from parsimony.memory.compaction import compact_by_summary, compact_with_memory
+from parsimony.memory.summary import ExtractiveSummarizer, Summarizer
 from parsimony.model import CachedResponse, CanonicalRequest, Dialect
 from parsimony.obs import MetricsSink, NullSink, SavingsEvent
 from parsimony.ports import CachePort, CompressorPort, MemoryPort, RedactorPort, TokenizerPort
@@ -51,11 +52,14 @@ class EngineConfig:
     cache_enabled: bool = True
     cache_ttl_seconds: int = 86_400
     salt: str = ""
-    # Track B memory (off by default). ingest builds the graph; inject compacts the request.
+    # Graph memory (off by default). ingest builds the graph; inject (Track B) compacts via
+    # retrieval; summarize (Track C) replaces older turns with a rolling summary.
     memory_enabled: bool = False
     memory_inject: bool = False
+    memory_summarize: bool = False
     memory_keep_recent: int = 4
     memory_retrieve: int = 3
+    memory_summary_items: int = 5
     memory_min_messages: int = 8
 
 
@@ -84,6 +88,7 @@ class ProxyEngine:
         metrics: MetricsSink | None = None,
         memory: MemoryPort | None = None,
         tokenizer: TokenizerPort | None = None,
+        summarizer: Summarizer | None = None,
     ) -> None:
         """Inject the upstream adapter, optimization components, config, metrics, and memory."""
         self._upstream = upstream
@@ -95,6 +100,7 @@ class ProxyEngine:
         self._metrics = metrics or NullSink()
         self._memory = memory
         self._tokenizer = tokenizer or default_tokenizer()
+        self._summarizer = summarizer or ExtractiveSummarizer()
 
     def route(self, dialect: Dialect, headers: list[tuple[str, str]]) -> str | None:
         """Return the upstream base URL for a request, or ``None`` if it cannot be routed."""
@@ -207,6 +213,18 @@ class ProxyEngine:
             self._memory.ingest(canonical)
         except Exception:
             return canonical, "off"
+        if self._config.memory_summarize:
+            try:
+                summarized = compact_by_summary(
+                    canonical,
+                    self._summarizer,
+                    keep_recent=self._config.memory_keep_recent,
+                    max_items=self._config.memory_summary_items,
+                    min_messages=self._config.memory_min_messages,
+                )
+            except Exception:
+                return canonical, "ingest"
+            return summarized, "summary" if summarized is not canonical else "ingest"
         if not self._config.memory_inject:
             return canonical, "ingest"
         try:

@@ -46,11 +46,13 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     metrics: bool = True
 
-    # Track B graph memory (off by default; injection changes the request, so it is opt-in).
+    # Graph memory (off by default; compaction changes the request, so it is opt-in).
     memory: bool = False
-    memory_inject: bool = False
+    memory_inject: bool = False  # Track B: compact via retrieval
+    memory_summarize: bool = False  # Track C: replace older turns with a rolling summary
     memory_keep_recent: int = 4
     memory_retrieve: int = 3
+    memory_summary_items: int = 5
     memory_min_messages: int = 8
 
     @field_validator("host")
