@@ -37,7 +37,6 @@ class GraphMemory:
         """Initialise with an optional pre-existing store and optional embedder."""
         self._store: GraphStore = store or InMemoryGraphStore()
         self._embedder = embedder
-        self._vectors: dict[str, list[float]] = {}
 
     @property
     def store(self) -> GraphStore:
@@ -58,20 +57,20 @@ class GraphMemory:
         return self._semantic_relevant(self._embedder, query, limit)
 
     def _reindex(self, embedder: EmbedderPort) -> None:
-        """Embed any store nodes that do not yet have a cached vector."""
-        missing = [node for node in self._store.nodes() if node.id not in self._vectors]
+        """Embed and persist vectors for any store nodes that don't have one yet."""
+        missing = [node for node in self._store.nodes() if self._store.get_vector(node.id) is None]
         if not missing:
             return
         vectors = embedder.embed([node.text for node in missing])
         for node, vector in zip(missing, vectors, strict=True):
-            self._vectors[node.id] = vector
+            self._store.set_vector(node.id, vector)
 
     def _semantic_relevant(self, embedder: EmbedderPort, query: str, limit: int) -> tuple[str, ...]:
         query_vector = embedder.embed([query])[0]
-        scored = [
-            (node, cosine(query_vector, self._vectors[node.id]))
-            for node in self._store.nodes()
-            if node.id in self._vectors
-        ]
+        scored: list[tuple[str, float]] = []
+        for node in self._store.nodes():
+            vector = self._store.get_vector(node.id)
+            if vector is not None:
+                scored.append((node.text, cosine(query_vector, vector)))
         scored.sort(key=lambda item: item[1], reverse=True)
-        return tuple(node.text for node, score in scored[:limit] if score > 0.0)
+        return tuple(text for text, score in scored[:limit] if score > 0.0)

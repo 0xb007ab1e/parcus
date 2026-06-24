@@ -47,6 +47,14 @@ class GraphStore(Protocol):
         """Number of edges."""
         ...
 
+    def set_vector(self, node_id: str, vector: list[float]) -> None:
+        """Store an embedding vector for a node."""
+        ...
+
+    def get_vector(self, node_id: str) -> list[float] | None:
+        """Return the stored embedding vector for a node, if any."""
+        ...
+
 
 class InMemoryGraphStore:
     """A simple in-process graph of :class:`MemoryNode`s and :class:`MemoryEdge`s."""
@@ -55,6 +63,7 @@ class InMemoryGraphStore:
         """Start with an empty graph."""
         self._nodes: dict[str, MemoryNode] = {}
         self._edges: list[MemoryEdge] = []
+        self._vectors: dict[str, list[float]] = {}
 
     def add_node(self, node: MemoryNode) -> None:
         """Insert or replace a node by id (idempotent for content-addressed ids)."""
@@ -85,3 +94,11 @@ class InMemoryGraphStore:
     def edge_count(self) -> int:
         """Number of edges in the graph."""
         return len(self._edges)
+
+    def set_vector(self, node_id: str, vector: list[float]) -> None:
+        """Store an embedding vector for a node."""
+        self._vectors[node_id] = vector
+
+    def get_vector(self, node_id: str) -> list[float] | None:
+        """Return the stored embedding vector for a node, if any."""
+        return self._vectors.get(node_id)
