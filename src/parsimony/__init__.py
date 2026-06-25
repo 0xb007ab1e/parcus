@@ -13,4 +13,4 @@ Design tenets (enforced throughout):
 * **Local-only models** — never issue an outbound inference call to save one.
 """
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"
