@@ -85,6 +85,37 @@ def test_similarity_threshold_out_of_range_rejected() -> None:
         Settings(_env_file=None, similarity_threshold=-0.1)
 
 
+def test_similarity_embedder_defaults_to_local() -> None:
+    assert Settings(_env_file=None).similarity_embedder == "local"
+
+
+def test_similarity_lexical_embedder_rejected_without_acknowledgement() -> None:
+    # The unsafe lexical embedder must be explicitly accepted (ADR 0004 fail-closed default).
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, similarity_cache=True, similarity_embedder="hashing")
+
+
+def test_similarity_lexical_embedder_allowed_with_acknowledgement() -> None:
+    s = Settings(
+        _env_file=None,
+        similarity_cache=True,
+        similarity_embedder="hashing",
+        similarity_allow_lexical=True,
+    )
+    assert s.similarity_embedder == "hashing"
+
+
+def test_similarity_unknown_embedder_rejected() -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, similarity_cache=True, similarity_embedder="openai")
+
+
+def test_similarity_embedder_unchecked_when_cache_off() -> None:
+    # The guard only applies when the cache is enabled — off-by-default config never trips it.
+    s = Settings(_env_file=None, similarity_cache=False, similarity_embedder="hashing")
+    assert s.similarity_cache is False
+
+
 def _b64key(nbytes: int = 32) -> str:
     import base64
 

@@ -93,8 +93,17 @@ def test_build_engine_has_no_rate_limiter_by_default() -> None:
 
 
 def test_build_engine_wires_similarity_when_enabled() -> None:
+    # Use the dep-free lexical embedder (explicitly acknowledged) so the test needs no model;
+    # the safe default is 'local', exercised via settings tests rather than a real model here.
     engine = cli.build_engine(
-        Settings(_env_file=None, cache=False, metrics=False, similarity_cache=True)
+        Settings(
+            _env_file=None,
+            cache=False,
+            metrics=False,
+            similarity_cache=True,
+            similarity_embedder="hashing",
+            similarity_allow_lexical=True,
+        )
     )
     assert engine._similarity is not None
 

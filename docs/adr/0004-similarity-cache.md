@@ -26,9 +26,13 @@ needs strong guards (master "correctness is the gate; tokens are the objective")
    same model AND same tenant**. The model guard avoids serving one model's answer for another;
    the **tenant guard is threat E1 again** — a cross-tenant similar-serve would leak data exactly
    like a cross-tenant exact hit. Fails open: any error → forward upstream.
-4. **Local embedder only.** Dependency-free `HashingEmbedder` by default; optional local
-   sentence-transformer. A similarity cache that called a remote embedding API would defeat the
-   project's purpose, so there is no remote embedder.
+4. **Local embedder; safe by default.** The default is the **local** sentence-transformer
+   (`similarity_embedder=local`) — the semantically-safe choice. The dependency-free lexical
+   `HashingEmbedder` is available but, being unsafe (see the finding below), requires an explicit
+   `similarity_allow_lexical=true` acknowledgement; otherwise enabling the cache with it **fails
+   closed at startup**. There is no remote embedder — a cache that called a remote embedding API
+   would defeat the project's purpose. *(Update: the original slice defaulted to `hashing`; the
+   default was flipped to `local` once the lexical-embedder limitation below was confirmed.)*
 5. **A precision gate is the pre-flight.** `parsimony eval --similarity` scores a labelled set of
    (anchor, variant, should-hit) pairs and **fails on any false hit** (precision < 1.0). A missed
    paraphrase is lost savings; a served non-paraphrase is a correctness bug — so the gate

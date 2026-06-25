@@ -63,11 +63,15 @@ class Settings(BaseSettings):
 
     # Opt-in semantic (near-duplicate) cache — serve a cached response for a *similar* request.
     # OFF by default (trades correctness for tokens); validate the threshold with
-    # `parsimony eval --similarity` before raising it. Lexical/hashing embedder is local + dep-free.
+    # `parsimony eval --similarity` before raising it.
     similarity_cache: bool = False
     similarity_threshold: float = 0.97  # cosine; deliberately high (near-duplicate only)
     similarity_max_entries: int = 2048
-    similarity_embedder: str = "hashing"  # hashing (dep-free) | local (sentence-transformers)
+    # Embedder: 'local' (sentence-transformers; the SAFE semantic default) | 'hashing' (lexical,
+    # dep-free). The lexical embedder is UNSAFE for caching (can't tell "10 replicas" from "2");
+    # using it requires the explicit acknowledgement below (ADR 0004).
+    similarity_embedder: str = "local"
+    similarity_allow_lexical: bool = False
 
     # At-rest cache encryption (opt-in). Key is base64(32 bytes) for AES-256, from env or a
     # keyfile (never in code/VCS). Enabling without a valid key fails closed at startup.
@@ -155,6 +159,28 @@ class Settings(BaseSettings):
             raise ValueError(
                 "PARSIMONY_CACHE_ENCRYPTION_PREVIOUS_KEYS must all be valid base64-encoded "
                 "32-byte keys"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_safe_similarity_embedder(self) -> Settings:
+        """Default the similarity cache to the safe local embedder; gate the unsafe lexical one.
+
+        The lexical ('hashing') embedder can't distinguish requests differing only in numbers or
+        entities, so it false-hits — unsafe for serving cached responses (ADR 0004). Using it for
+        the similarity cache therefore requires an explicit risk acknowledgement; fail fast on
+        misconfiguration or an unknown embedder.
+        """
+        if not self.similarity_cache:
+            return self
+        if self.similarity_embedder not in ("local", "hashing"):
+            raise ValueError("similarity_embedder must be 'local' or 'hashing'")
+        if self.similarity_embedder == "hashing" and not self.similarity_allow_lexical:
+            raise ValueError(
+                "the lexical 'hashing' embedder is UNSAFE for the similarity cache (it can't "
+                "distinguish requests differing only in numbers/entities — ADR 0004); set "
+                "similarity_embedder=local (install the 'embeddings' extra) or, to accept the "
+                "risk, set similarity_allow_lexical=true"
             )
         return self
 
