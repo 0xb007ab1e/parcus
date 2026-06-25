@@ -39,37 +39,54 @@ _HEADER_LEN = len(_VERSION) + _NONCE_LEN
 
 
 class CacheCipher:
-    """AES-256-GCM sealer/opener for cache values.
+    """AES-256-GCM sealer/opener for cache values, with graceful key rotation.
+
+    New values are always sealed with the **current** key. Opening tries the current key then
+    each **previous** key in turn, so entries written before a rotation stay readable during the
+    overlap window (rotate the key → move the old key to ``previous_keys`` → old entries decrypt
+    until they expire by TTL, then drop the old key). The blob format carries no key id; trying a
+    handful of keys on a read is cheap and avoids leaking which key sealed an entry.
 
     Args:
-        key: A 32-byte (AES-256) key.
+        key: The current 32-byte (AES-256) key — used for both sealing and opening.
+        previous_keys: Retired keys kept for **decryption only** during a rotation window.
 
     Raises:
-        ValueError: If ``key`` is not exactly 32 bytes.
+        ValueError: If any key is not exactly 32 bytes.
     """
 
-    def __init__(self, key: bytes) -> None:
-        """Validate the key length and construct the AEAD."""
-        if len(key) != _KEY_LEN:
-            raise ValueError(f"cache encryption key must be {_KEY_LEN} bytes (AES-256)")
-        self._aead = AESGCM(key)
+    def __init__(self, key: bytes, *, previous_keys: tuple[bytes, ...] = ()) -> None:
+        """Validate key lengths; build the sealing AEAD and the ordered opening AEADs."""
+        for candidate in (key, *previous_keys):
+            if len(candidate) != _KEY_LEN:
+                raise ValueError(f"cache encryption key must be {_KEY_LEN} bytes (AES-256)")
+        self._sealer = AESGCM(key)
+        # Current key first (the common case), then retired keys for the rotation overlap.
+        self._openers = (self._sealer, *(AESGCM(k) for k in previous_keys))
 
     def seal(self, aad: str, plaintext: bytes) -> bytes:
-        """Return ``version || nonce || ciphertext+tag``; ``aad`` (cache key) is authenticated."""
+        """Return ``version || nonce || ciphertext+tag`` sealed with the **current** key."""
         nonce = os.urandom(_NONCE_LEN)
-        ciphertext = self._aead.encrypt(nonce, plaintext, aad.encode("utf-8"))
+        ciphertext = self._sealer.encrypt(nonce, plaintext, aad.encode("utf-8"))
         return _VERSION + nonce + ciphertext
 
     def open(self, aad: str, blob: bytes) -> bytes | None:
-        """Return the plaintext, or ``None`` if the blob is unknown-version/tampered/wrong-key."""
+        """Return the plaintext, or ``None`` if no key decrypts it (bad version/tamper/wrong key).
+
+        Tries the current key then each previous key, so a value sealed before a rotation still
+        opens during the overlap window.
+        """
         if len(blob) < _HEADER_LEN or blob[:1] != _VERSION:
             return None
         nonce = blob[len(_VERSION) : _HEADER_LEN]
         ciphertext = blob[_HEADER_LEN:]
-        try:
-            return self._aead.decrypt(nonce, ciphertext, aad.encode("utf-8"))
-        except InvalidTag:
-            return None
+        data = aad.encode("utf-8")
+        for aead in self._openers:
+            try:
+                return aead.decrypt(nonce, ciphertext, data)
+            except InvalidTag:
+                continue
+        return None
 
 
 class EncryptedCache:

@@ -136,6 +136,34 @@ def test_encryption_key_is_not_exposed_in_repr() -> None:
     assert "\x07" * 32 not in repr(s)  # SecretStr masks the value
 
 
+def test_previous_keys_resolve_for_rotation() -> None:
+    import base64
+
+    prev = base64.b64encode(b"\x09" * 32).decode()
+    s = Settings(
+        _env_file=None,
+        cache_encryption=True,
+        cache_encryption_key=_b64key(),
+        cache_encryption_previous_keys=prev,
+    )
+    assert s.cache_encryption_previous_key_bytes() == (b"\x09" * 32,)
+
+
+def test_no_previous_keys_by_default() -> None:
+    s = Settings(_env_file=None, cache_encryption=True, cache_encryption_key=_b64key())
+    assert s.cache_encryption_previous_key_bytes() == ()
+
+
+def test_invalid_previous_key_rejected() -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            cache_encryption=True,
+            cache_encryption_key=_b64key(),
+            cache_encryption_previous_keys="not-valid-base64!!",
+        )
+
+
 def test_learned_disabled_by_default() -> None:
     s = Settings(_env_file=None)
     assert s.learned is False

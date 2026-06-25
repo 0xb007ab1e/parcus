@@ -158,7 +158,8 @@ def _maybe_encrypt(cache: CachePort, settings: Settings) -> CachePort:
     key = settings.cache_encryption_key_bytes()
     if key is None:  # defensive: settings validation already guarantees a key here (fail closed)
         raise RuntimeError("cache encryption enabled without a valid key")
-    return EncryptedCache(cache, CacheCipher(key))
+    previous = settings.cache_encryption_previous_key_bytes()
+    return EncryptedCache(cache, CacheCipher(key, previous_keys=previous))
 
 
 def _build_similarity(settings: Settings) -> SimilarityCache | None:

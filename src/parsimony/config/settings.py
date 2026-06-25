@@ -15,6 +15,16 @@ __all__ = ["Settings"]
 
 _ENCRYPTION_KEY_LEN = 32  # AES-256
 
+
+def _decode_key(encoded: str) -> bytes | None:
+    """Decode a base64 key to raw bytes, or ``None`` if it isn't valid base64 of 32 bytes."""
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    return raw if len(raw) == _ENCRYPTION_KEY_LEN else None
+
+
 # Values we REFUSE to bind (never public/all-interfaces — tailnet rule). The 0.0.0.0 literal
 # here is a denylist entry, not a bind target.
 _FORBIDDEN_BIND = {"0.0.0.0", "::", ""}  # noqa: S104  # nosec B104
@@ -64,6 +74,10 @@ class Settings(BaseSettings):
     cache_encryption: bool = False
     cache_encryption_key: SecretStr = SecretStr("")
     cache_encryption_keyfile: str = ""
+    # Retired keys (comma-separated base64(32 bytes)) kept for DECRYPT-ONLY during a rotation
+    # window: rotate by making the new key current and moving the old key here; drop it once old
+    # entries have expired by TTL.
+    cache_encryption_previous_keys: SecretStr = SecretStr("")
 
     redact: bool = True
     log_level: str = "INFO"
@@ -135,6 +149,13 @@ class Settings(BaseSettings):
                 "PARSIMONY_CACHE_ENCRYPTION=true requires a valid base64-encoded 32-byte key "
                 "(PARSIMONY_CACHE_ENCRYPTION_KEY or PARSIMONY_CACHE_ENCRYPTION_KEYFILE)"
             )
+        # Any configured previous (rotation) key must also be a valid 32-byte key.
+        raw = self._previous_key_strings()
+        if self.cache_encryption and len(self.cache_encryption_previous_key_bytes()) != len(raw):
+            raise ValueError(
+                "PARSIMONY_CACHE_ENCRYPTION_PREVIOUS_KEYS must all be valid base64-encoded "
+                "32-byte keys"
+            )
         return self
 
     @model_validator(mode="after")
@@ -181,10 +202,18 @@ class Settings(BaseSettings):
                 return None
         elif self.cache_encryption_key.get_secret_value():
             encoded = self.cache_encryption_key.get_secret_value()
-        if not encoded:
-            return None
-        try:
-            raw = base64.b64decode(encoded, validate=True)
-        except (binascii.Error, ValueError):
-            return None
-        return raw if len(raw) == _ENCRYPTION_KEY_LEN else None
+        return _decode_key(encoded) if encoded else None
+
+    def _previous_key_strings(self) -> list[str]:
+        """Return the configured previous-key base64 strings (comma-separated → list)."""
+        return [
+            k.strip()
+            for k in self.cache_encryption_previous_keys.get_secret_value().split(",")
+            if k.strip()
+        ]
+
+    def cache_encryption_previous_key_bytes(self) -> tuple[bytes, ...]:
+        """Resolve the retired (rotation) keys to 32-byte values, dropping any that don't decode."""
+        return tuple(
+            raw for s in self._previous_key_strings() if (raw := _decode_key(s)) is not None
+        )

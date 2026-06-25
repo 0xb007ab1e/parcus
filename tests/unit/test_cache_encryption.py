@@ -53,6 +53,30 @@ class TestCacheCipher:
         assert cipher.open("k", b"\x99" + b"\x00" * 20) is None  # bad version byte
         assert cipher.open("k", b"\x01") is None  # too short for nonce
 
+    def test_rejects_wrong_length_previous_key(self) -> None:
+        with pytest.raises(ValueError, match="32 bytes"):
+            CacheCipher(_KEY, previous_keys=(b"short",))
+
+
+class TestKeyRotation:
+    def test_seals_with_current_key_only(self) -> None:
+        # After rotation, new writes use the current key; the old key alone can't read them.
+        rotated = CacheCipher(_KEY2, previous_keys=(_KEY,))
+        blob = rotated.seal("k", b"new data")
+        assert CacheCipher(_KEY).open("k", blob) is None  # old key can't open new entry
+        assert rotated.open("k", blob) == b"new data"  # current key opens it
+
+    def test_opens_entry_sealed_under_previous_key(self) -> None:
+        # An entry sealed before rotation (under _KEY) stays readable after rotating to _KEY2.
+        old_blob = CacheCipher(_KEY).seal("k", b"old data")
+        rotated = CacheCipher(_KEY2, previous_keys=(_KEY,))
+        assert rotated.open("k", old_blob) == b"old data"
+
+    def test_unknown_key_still_fails_after_rotation(self) -> None:
+        blob = CacheCipher(b"\x02" * 32).seal("k", b"data")  # sealed under a third, dropped key
+        rotated = CacheCipher(_KEY2, previous_keys=(_KEY,))
+        assert rotated.open("k", blob) is None
+
 
 class TestEncryptedCache:
     def test_stores_ciphertext_and_round_trips(self) -> None:
@@ -113,6 +137,17 @@ class TestEncryptedCache:
         enc = EncryptedCache(inner, _BoomCipher())  # type: ignore[arg-type]
         enc.put("k", CachedResponse(status_code=200, body=b"x", content_type=None), 60)  # no raise
         assert inner.get("k") is None  # nothing was stored
+
+    def test_survives_key_rotation(self) -> None:
+        # Write under the old key, then rotate: the entry is still served via the previous key.
+        inner = SqliteCache()
+        EncryptedCache(inner, CacheCipher(_KEY)).put(
+            "k", CachedResponse(status_code=200, body=b"pre-rotation", content_type=None), 60
+        )
+        rotated = EncryptedCache(inner, CacheCipher(_KEY2, previous_keys=(_KEY,)))
+        got = rotated.get("k")
+        assert got is not None
+        assert got.body == b"pre-rotation"
 
     def test_close_is_noop_when_inner_has_no_close(self) -> None:
         class _NoCloseCache:

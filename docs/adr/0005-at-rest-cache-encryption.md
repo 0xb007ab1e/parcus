@@ -45,9 +45,13 @@ model deferred at-rest encryption ("M2+"); this ADR delivers it.
   one-flag opt-in and a generated key; the default local experience is unchanged.
 - AEAD gives integrity + tamper detection for free (addresses T2 tampering, not just
   confidentiality).
-- **Key rotation** today means: rotate the key → old entries become undecryptable → they read as
-  misses and re-populate. The version byte leaves room for a future dual-key/rotation-aware
-  scheme. **Crypto-shredding** per tenant (drop a tenant's key to erase their cached data)
-  composes naturally with the ADR 0003 server-side tenant identity — a future slice.
-- No remote KMS integration yet (key is env/keyfile); a KMS-backed key provider is a possible
+- **Graceful key rotation (delivered).** `CacheCipher` seals with the **current** key and opens
+  with the current key plus any configured **previous** keys (`PARSIMONY_CACHE_ENCRYPTION_PREVIOUS_KEYS`,
+  decrypt-only). Rotate by promoting a new current key and moving the old one to the previous
+  list; entries sealed before the rotation stay readable through the overlap, then age out by
+  TTL, after which the old key can be dropped — no cache loss, no plaintext exposure. Trying a
+  few keys on a read is cheap and the blob carries no key id (doesn't reveal which key sealed an
+  entry). **Crypto-shredding** per tenant (drop a tenant's key to erase their cached data)
+  composes naturally with the ADR 0003 tenant identity — a future slice.
+- No remote KMS integration yet (keys are env/keyfile); a KMS-backed key provider is a possible
   follow-up for cloud deployments.
