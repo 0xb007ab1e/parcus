@@ -50,7 +50,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${GITHUB_REF_NAME}" dist/* sbom.cdx.json --generate-notes
 
-      # PyPI publishing is deliberately omitted — it's an outward, hard-to-reverse action to
-      # decide explicitly. To enable it, configure PyPI Trusted Publishing (OIDC, no secrets)
-      # and add (pinned by digest):
-      #   - uses: pypa/gh-action-pypi-publish@<sha>  # vX
+      # PyPI publishing via Trusted Publishing (OIDC — no stored token). Gated OFF by default so a
+      # release still succeeds before the publisher is configured. To ENABLE:
+      #   1. On pypi.org, add a (pending) Trusted Publisher for project `parcus`:
+      #        owner=0xb007ab1e, repo=parcus, workflow=release.yml  (environment optional).
+      #   2. Set repo variable PUBLISH_TO_PYPI=true (Settings → Secrets and variables → Actions).
+      # Then a tagged release publishes automatically (or re-run this run to publish an existing tag).
+      - name: Publish to PyPI (Trusted Publishing)
+        if: ${{ vars.PUBLISH_TO_PYPI == 'true' }}
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
+        with:
+          packages-dir: dist # the built wheel + sdist only (SBOM stays a GitHub Release asset)
