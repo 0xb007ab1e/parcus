@@ -10,14 +10,22 @@ stateful agentic loops. Components:
 * :class:`~parsimony.cache.sqlite_cache.SqliteCache` — the confidential, TTL-bound store;
 * :class:`~parsimony.cache.clock.SystemClock` — injected time source.
 
-Embedding-similarity reuse is deliberately **not** part of this module; it is a separate,
-off-by-default mode planned for a later milestone.
+Embedding-similarity reuse (:class:`~parsimony.cache.similarity.SimilarityCache`) is a separate,
+**off-by-default** mode that widens hits to near-duplicate requests — see its module docstring.
 """
 
 from parsimony.cache.clock import SystemClock
 from parsimony.cache.key import compute_key
 from parsimony.cache.null import NullCache
 from parsimony.cache.policy import CachePolicy
+from parsimony.cache.similarity import SimilarityCache
 from parsimony.cache.sqlite_cache import SqliteCache
 
-__all__ = ["CachePolicy", "NullCache", "SqliteCache", "SystemClock", "compute_key"]
+__all__ = [
+    "CachePolicy",
+    "NullCache",
+    "SimilarityCache",
+    "SqliteCache",
+    "SystemClock",
+    "compute_key",
+]

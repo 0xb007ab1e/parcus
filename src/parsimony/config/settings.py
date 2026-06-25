@@ -44,6 +44,14 @@ class Settings(BaseSettings):
     cache_nocache_patterns: str = ""
     salt: str = ""
 
+    # Opt-in semantic (near-duplicate) cache — serve a cached response for a *similar* request.
+    # OFF by default (trades correctness for tokens); validate the threshold with
+    # `parsimony eval --similarity` before raising it. Lexical/hashing embedder is local + dep-free.
+    similarity_cache: bool = False
+    similarity_threshold: float = 0.97  # cosine; deliberately high (near-duplicate only)
+    similarity_max_entries: int = 2048
+    similarity_embedder: str = "hashing"  # hashing (dep-free) | local (sentence-transformers)
+
     redact: bool = True
     log_level: str = "INFO"
     metrics: bool = True
@@ -77,6 +85,14 @@ class Settings(BaseSettings):
         """Reject a negative rate/burst (fail fast on misconfig)."""
         if value < 0:
             raise ValueError("rate limit values must be >= 0 (0 disables limiting)")
+        return value
+
+    @field_validator("similarity_threshold")
+    @classmethod
+    def _reject_out_of_range_threshold(cls, value: float) -> float:
+        """Require the cosine threshold in [0, 1] (fail fast on misconfig)."""
+        if not 0.0 <= value <= 1.0:
+            raise ValueError("similarity_threshold must be in [0.0, 1.0]")
         return value
 
     @field_validator("host")

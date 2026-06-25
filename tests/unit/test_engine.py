@@ -53,6 +53,7 @@ def _engine(upstream: FakeUpstream, **kw: object) -> ProxyEngine:
         ),
         metrics=kw.get("metrics"),  # type: ignore[arg-type]
         rate_limiter=kw.get("rate_limiter"),  # type: ignore[arg-type]
+        similarity=kw.get("similarity"),  # type: ignore[arg-type]
     )
 
 
@@ -324,3 +325,62 @@ class TestRateLimiting:
         b1 = await eng.handle("POST", "/v1/messages", [("x-api-key", "tenant-b")], body)
         assert a2.status_code == 429  # tenant a exhausted its bucket
         assert b1.status_code == 200  # tenant b has its own bucket
+
+
+class _MarkerEmbedder:
+    """Deterministic embedder keyed on a marker token in the request text."""
+
+    def embed(self, texts: object) -> list[list[float]]:
+        out: list[list[float]] = []
+        for t in texts:  # type: ignore[attr-defined]
+            if "ALPHA" in t:
+                out.append([1.0, 0.0])
+            elif "BETA" in t:
+                out.append([0.0, 1.0])
+            else:
+                out.append([0.5, 0.5])
+        return out
+
+
+class TestSimilarityCache:
+    """Opt-in semantic cache: serve a near-duplicate's response on an exact miss."""
+
+    async def test_near_duplicate_served_without_upstream(self) -> None:
+        from parsimony.cache import SimilarityCache
+
+        up = FakeUpstream()
+        sim = SimilarityCache(_MarkerEmbedder(), threshold=0.97)
+        eng = _engine(up, cache=SqliteCache(), similarity=sim)
+        first = await eng.handle(
+            "POST", "/v1/messages", [("x-api-key", "k")], _anthropic("ALPHA one")
+        )
+        second = await eng.handle(
+            "POST", "/v1/messages", [("x-api-key", "k")], _anthropic("ALPHA two")
+        )
+        assert first.meta["cache"] == "miss"
+        assert second.meta["cache"] == "similar"  # near-duplicate of the first
+        assert up.calls == 1  # the second request never reached the provider
+        assert second.content == first.content
+
+    async def test_dissimilar_request_forwards(self) -> None:
+        from parsimony.cache import SimilarityCache
+
+        up = FakeUpstream()
+        sim = SimilarityCache(_MarkerEmbedder(), threshold=0.97)
+        eng = _engine(up, cache=SqliteCache(), similarity=sim)
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], _anthropic("ALPHA one"))
+        other = await eng.handle(
+            "POST", "/v1/messages", [("x-api-key", "k")], _anthropic("BETA two")
+        )
+        assert other.meta["cache"] == "miss"
+        assert up.calls == 2  # dissimilar -> forwarded
+
+    async def test_disabled_by_default(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(up, cache=SqliteCache())  # no similarity injected
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], _anthropic("ALPHA one"))
+        second = await eng.handle(
+            "POST", "/v1/messages", [("x-api-key", "k")], _anthropic("ALPHA two")
+        )
+        assert second.meta["cache"] == "miss"
+        assert up.calls == 2

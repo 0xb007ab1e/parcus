@@ -23,10 +23,17 @@ from parsimony.eval.retrieval import (
 )
 from parsimony.eval.runner import evaluate
 from parsimony.eval.samples import BUILTIN_SAMPLES
+from parsimony.eval.similarity import (
+    BUILTIN_SIMILARITY_SAMPLES,
+    SimilarityReport,
+    SimilaritySample,
+    evaluate_similarity,
+)
 
 __all__ = [
     "BUILTIN_RETRIEVAL_SAMPLES",
     "BUILTIN_SAMPLES",
+    "BUILTIN_SIMILARITY_SAMPLES",
     "EvalReport",
     "KeywordRecallJudge",
     "LLMJudge",
@@ -36,8 +43,11 @@ __all__ = [
     "RetrievalSample",
     "Sample",
     "SampleResult",
+    "SimilarityReport",
+    "SimilaritySample",
     "evaluate",
     "evaluate_retrieval",
+    "evaluate_similarity",
     "filler_violations",
     "is_filler_equivalent",
     "is_lossless_equivalent",

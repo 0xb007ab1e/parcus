@@ -17,7 +17,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from parsimony import __version__
-from parsimony.cache import CachePolicy, NullCache, SqliteCache
+from parsimony.cache import CachePolicy, NullCache, SimilarityCache, SqliteCache
 from parsimony.compress import (
     DEFAULT_FILLERS,
     ChainCompressor,
@@ -29,8 +29,10 @@ from parsimony.config import Settings
 from parsimony.eval import (
     BUILTIN_RETRIEVAL_SAMPLES,
     BUILTIN_SAMPLES,
+    BUILTIN_SIMILARITY_SAMPLES,
     evaluate,
     evaluate_retrieval,
+    evaluate_similarity,
     is_filler_equivalent,
     load_jsonl,
 )
@@ -106,6 +108,7 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
     memory_provider = _build_memory_provider(settings)
     rate_limit = settings.rate_limit()
     rate_limiter = RateLimiter(rate_limit) if rate_limit is not None else None
+    similarity = _build_similarity(settings)
     return ProxyEngine(
         upstream=HttpxUpstream(),
         compressor=compressor,
@@ -131,6 +134,19 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
         metrics=metrics_sink,
         memory_provider=memory_provider,
         rate_limiter=rate_limiter,
+        similarity=similarity,
+    )
+
+
+def _build_similarity(settings: Settings) -> SimilarityCache | None:
+    """Build the opt-in semantic cache (local embedder), or ``None`` when disabled."""
+    if not settings.similarity_cache:
+        return None
+    embedder = _embedder(settings.similarity_embedder) or HashingEmbedder()
+    return SimilarityCache(
+        embedder,
+        threshold=settings.similarity_threshold,
+        max_entries=settings.similarity_max_entries,
     )
 
 
@@ -177,10 +193,21 @@ def _parser() -> argparse.ArgumentParser:
         help="Run the memory retrieval-quality gate (recall) instead of compression eval.",
     )
     ev.add_argument(
+        "--similarity",
+        action="store_true",
+        help="Run the semantic-cache precision gate (no false hits) instead of compression eval.",
+    )
+    ev.add_argument(
+        "--threshold",
+        type=float,
+        default=0.97,
+        help="Cosine threshold for --similarity (default 0.97).",
+    )
+    ev.add_argument(
         "--embedder",
         choices=["lexical", "hashing", "local"],
         default="lexical",
-        help="Retrieval embedder for --retrieval: lexical (default), hashing, or local "
+        help="Embedder for --retrieval/--similarity: lexical (default), hashing, or local "
         "(sentence-transformers; requires the 'embeddings' extra).",
     )
     ev.add_argument(
@@ -222,6 +249,16 @@ def main(argv: list[str] | None = None) -> int:
             if args.record:
                 _record_eval("retrieval", retrieval_report.mean_score, retrieval_report.passed)
             return 0 if retrieval_report.passed else 1
+        if args.similarity:
+            sim_report = evaluate_similarity(
+                BUILTIN_SIMILARITY_SAMPLES,
+                threshold=args.threshold,
+                embedder=_embedder(args.embedder),
+            )
+            print(sim_report.render())
+            if args.record:
+                _record_eval("similarity", sim_report.precision, sim_report.passed)
+            return 0 if sim_report.passed else 1
         samples = load_jsonl(args.dataset) if args.dataset else BUILTIN_SAMPLES
         if args.filler:
             report = evaluate(

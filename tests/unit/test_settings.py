@@ -68,3 +68,16 @@ def test_rate_limit_built_when_configured() -> None:
 def test_negative_rate_limit_rejected() -> None:
     with pytest.raises(ValidationError):
         Settings(_env_file=None, rate_limit_per_minute=-1)
+
+
+def test_similarity_cache_disabled_by_default() -> None:
+    s = Settings(_env_file=None)
+    assert s.similarity_cache is False
+    assert s.similarity_threshold == 0.97
+
+
+def test_similarity_threshold_out_of_range_rejected() -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, similarity_threshold=1.5)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, similarity_threshold=-0.1)

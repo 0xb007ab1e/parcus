@@ -18,6 +18,7 @@ from typing import Any
 
 from parsimony.cache.key import compute_key
 from parsimony.cache.policy import CachePolicy
+from parsimony.cache.similarity import SimilarityCache
 from parsimony.memory.compaction import compact_by_summary, compact_with_memory
 from parsimony.memory.provider import MemoryProvider, SharedMemoryProvider
 from parsimony.memory.summary import ExtractiveSummarizer, Summarizer
@@ -99,6 +100,7 @@ class ProxyEngine:
         memory: MemoryPort | None = None,
         memory_provider: MemoryProvider | None = None,
         rate_limiter: RateLimiter | None = None,
+        similarity: SimilarityCache | None = None,
         tokenizer: TokenizerPort | None = None,
         summarizer: Summarizer | None = None,
     ) -> None:
@@ -117,6 +119,7 @@ class ProxyEngine:
         self._metrics = metrics or NullSink()
         self._memory_provider = memory_provider or SharedMemoryProvider(memory)
         self._rate_limiter = rate_limiter
+        self._similarity = similarity
         self._tokenizer = tokenizer or default_tokenizer()
         self._summarizer = summarizer or ExtractiveSummarizer()
 
@@ -219,6 +222,9 @@ class ProxyEngine:
                 if hit is not None:
                     return self._from_cache(hit, meta)
                 meta["cache"] = "miss"
+                similar = self._similar_hit(canonical, tenant)
+                if similar is not None:
+                    return self._from_cache(similar, meta, outcome="similar")
 
         response = await self._upstream.send(
             UpstreamRequest(
@@ -230,6 +236,10 @@ class ProxyEngine:
         )
         if cache_key is not None and 200 <= response.status_code < 300:
             self._store(cache_key, response)
+            if self._similarity is not None and canonical is not None:
+                self._similarity.remember(
+                    text=canonical.text, key=cache_key, model=canonical.model, tenant=tenant
+                )
         return ProxyResult(
             status_code=response.status_code,
             headers=self._response_headers(response.headers),
@@ -354,6 +364,21 @@ class ProxyEngine:
         except Exception:
             return None
 
+    def _similar_hit(self, canonical: CanonicalRequest, tenant: str) -> CachedResponse | None:
+        """Return a near-duplicate's cached response (same model + tenant), or ``None``.
+
+        Consults the similarity index (when enabled) on an exact miss, then fetches the
+        neighbour's response from the exact cache so TTL/eviction still apply. Fails open.
+        """
+        if self._similarity is None or canonical.stream:
+            return None
+        neighbour = self._similarity.lookup(
+            text=canonical.text, model=canonical.model, tenant=tenant
+        )
+        if neighbour is None:
+            return None
+        return self._cache.get(neighbour)
+
     def _store(self, key: str, response: UpstreamResponse) -> None:
         self._cache.put(
             key,
@@ -365,13 +390,15 @@ class ProxyEngine:
             self._config.cache_ttl_seconds,
         )
 
-    def _from_cache(self, hit: CachedResponse, meta: dict[str, Any]) -> ProxyResult:
+    def _from_cache(
+        self, hit: CachedResponse, meta: dict[str, Any], *, outcome: str = "hit"
+    ) -> ProxyResult:
         headers = [("content-type", hit.content_type or "application/json")]
         return ProxyResult(
             status_code=hit.status_code,
             headers=headers,
             content=hit.body,
-            meta={**meta, "cache": "hit"},
+            meta={**meta, "cache": outcome},
         )
 
     @staticmethod

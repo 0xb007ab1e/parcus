@@ -79,6 +79,26 @@ def test_build_engine_has_no_rate_limiter_by_default() -> None:
     assert engine._rate_limiter is None
 
 
+def test_build_engine_wires_similarity_when_enabled() -> None:
+    engine = cli.build_engine(
+        Settings(_env_file=None, cache=False, metrics=False, similarity_cache=True)
+    )
+    assert engine._similarity is not None
+
+
+def test_build_engine_has_no_similarity_by_default() -> None:
+    engine = cli.build_engine(Settings(_env_file=None, cache=False, metrics=False))
+    assert engine._similarity is None
+
+
+def test_eval_similarity_command_runs(capsys: pytest.CaptureFixture[str]) -> None:
+    # The default (lexical) embedder fails the adversarial built-in set -> exit 1, by design:
+    # the gate is signalling that the dependency-free embedder is unsafe for semantic caching.
+    rc = cli.main(["eval", "--similarity"])
+    assert rc == 1
+    assert "threshold=" in capsys.readouterr().out
+
+
 def test_stats_command_runs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
