@@ -6,14 +6,14 @@ import os
 
 import pytest
 
-from parsimony.cache import SqliteCache
-from parsimony.cache.encryption import (
+from parcus.cache import SqliteCache
+from parcus.cache.encryption import (
     CacheCipher,
     EncryptedCache,
     StaticCipherProvider,
     TenantCipherProvider,
 )
-from parsimony.model import CachedResponse
+from parcus.model import CachedResponse
 
 _KEY = b"\x00" * 32
 _KEY2 = b"\x01" * 32

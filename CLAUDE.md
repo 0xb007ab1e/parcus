@@ -1,4 +1,4 @@
-# parsimony — project rules
+# parcus — project rules
 
 > Inherits the master SSDLC ruleset (`~/.claude/CLAUDE.md`) automatically.
 > A local-first, token-thrift **inference proxy** for agentic harnesses. See `PLAN.md`.

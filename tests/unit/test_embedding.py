@@ -6,14 +6,14 @@ import importlib.util
 
 import pytest
 
-from parsimony.memory import (
+from parcus.memory import (
     EmbedderPort,
     GraphMemory,
     HashingEmbedder,
     SentenceTransformerEmbedder,
     cosine,
 )
-from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
 
 
 def _req(*texts: str) -> CanonicalRequest:

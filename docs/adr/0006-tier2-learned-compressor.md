@@ -14,7 +14,7 @@ invariant** that can prove the output preserves meaning. That changes how it mus
 
 ## Decision
 
-1. **Off by default, opt-in.** `PARSIMONY_LEARNED=false`; `PARSIMONY_LEARNED_RATIO` (keep-ratio
+1. **Off by default, opt-in.** `PARCUS_LEARNED=false`; `PARCUS_LEARNED_RATIO` (keep-ratio
    in `(0, 1]`, default 0.5). It is the **last** pass in the chain (lossless → filler → learned),
    so it only ever sees already-trimmed prose.
 2. **Mutable spans only; fail open.** Like every tier it touches only mutable prose spans (code,
@@ -26,7 +26,7 @@ invariant** that can prove the output preserves meaning. That changes how it mus
    reports `ok=None` ("no runtime invariant; accuracy comes from the offline gate"), which the
    observability layer already understands.
 4. **Correctness is gated offline, before enabling.** The gate is an **answer-preservation
-   quality judge** (`parsimony.eval.quality.LLMJudge`) run over the eval corpus with a **local**
+   quality judge** (`parcus.eval.quality.LLMJudge`) run over the eval corpus with a **local**
    judge model — comparing answers to the original vs. compressed prompt. An operator runs this
    offline and only enables Tier-2 if it holds the no-regression bar. This is deliberately *not*
    a CI gate: it needs a model, and CI stays hermetic. CI instead covers the **mechanism** (span
@@ -45,7 +45,7 @@ invariant** that can prove the output preserves meaning. That changes how it mus
 - The honest limitation: Tier-2's safety rests on the operator running the offline judge gate —
   there is no per-request proof. The design makes that explicit (`ok=None`, docs, off-by-default)
   rather than implying a guarantee it can't provide.
-- `parsimony.compress.learned` is in the 100%-critical coverage gate; the model-dependent
+- `parcus.compress.learned` is in the 100%-critical coverage gate; the model-dependent
   `LLMLinguaReducer.reduce` body is `# pragma: no cover` (exercised only with the extra + model).
 - Follow-ups: a built-in `eval --learned` flow once a small local judge is bundled/cached; an
   LLMLingua-2 path; per-domain keep-ratio tuning.

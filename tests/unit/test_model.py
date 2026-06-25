@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from parsimony.model import (
+from parcus.model import (
     CanonicalRequest,
     CompressionStats,
     Dialect,

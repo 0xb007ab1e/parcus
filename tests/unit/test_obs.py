@@ -7,7 +7,7 @@ import logging
 
 import pytest
 
-from parsimony.obs import AggregateSink, LoggingSink, MultiSink, NullSink, SavingsEvent
+from parcus.obs import AggregateSink, LoggingSink, MultiSink, NullSink, SavingsEvent
 
 
 def _event(
@@ -75,7 +75,7 @@ class TestSinks:
         assert NullSink().record(_event()) is None
 
     def test_logging_sink_emits_json(self, caplog: pytest.LogCaptureFixture) -> None:
-        caplog.set_level(logging.INFO, logger="parsimony.savings")
+        caplog.set_level(logging.INFO, logger="parcus.savings")
         LoggingSink().record(_event())
         payload = json.loads(caplog.records[-1].getMessage())
         assert payload["event"] == "savings"

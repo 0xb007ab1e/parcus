@@ -8,12 +8,12 @@ import httpx
 import respx
 from fastapi.testclient import TestClient
 
-from parsimony.cache import CachePolicy, NullCache
-from parsimony.compress import LosslessCompressor
-from parsimony.proxy import create_app
-from parsimony.proxy.engine import EngineConfig, ProxyEngine
-from parsimony.proxy.upstream import UpstreamRequest, UpstreamResponse
-from parsimony.redact import Redactor
+from parcus.cache import CachePolicy, NullCache
+from parcus.compress import LosslessCompressor
+from parcus.proxy import create_app
+from parcus.proxy.engine import EngineConfig, ProxyEngine
+from parcus.proxy.upstream import UpstreamRequest, UpstreamResponse
+from parcus.redact import Redactor
 
 
 class FakeUpstream:
@@ -55,8 +55,8 @@ def test_non_streaming_request_is_proxied_and_compressed() -> None:
         )
     assert response.status_code == 200
     assert response.json() == {"ok": True}
-    assert response.headers["x-parsimony-cache"] == "off"
-    assert response.headers["x-parsimony-dialect"] == "anthropic"
+    assert response.headers["x-parcus-cache"] == "off"
+    assert response.headers["x-parcus-dialect"] == "anthropic"
     assert json.loads(up.last.content)["messages"][0]["content"] == "hi\n\n"
 
 
@@ -75,7 +75,7 @@ def test_streaming_request_is_passed_through() -> None:
             headers={"x-api-key": "k"},
         )
     assert response.status_code == 200
-    assert response.headers["x-parsimony-cache"] == "stream-bypass"
+    assert response.headers["x-parcus-cache"] == "stream-bypass"
     assert b"ping" in response.content
 
 

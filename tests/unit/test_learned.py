@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import math
 
-from parsimony.compress.learned import LearnedCompressor
-from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
+from parcus.compress.learned import LearnedCompressor
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
 
 
 def _req(*spans: Span, system: str | None = None) -> CanonicalRequest:

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from parsimony.memory import GraphMemory, HashingEmbedder, InMemoryGraphStore, SqliteGraphStore
-from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
+from parcus.memory import GraphMemory, HashingEmbedder, InMemoryGraphStore, SqliteGraphStore
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
 
 
 def _req(*texts: str) -> CanonicalRequest:

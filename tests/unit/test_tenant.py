@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from parsimony.tenant import ANONYMOUS_TENANT, derive_tenant, is_authorized
+from parcus.tenant import ANONYMOUS_TENANT, derive_tenant, is_authorized
 
 
 def test_no_credential_is_anonymous() -> None:

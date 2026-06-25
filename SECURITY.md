@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-`parsimony` is a local development tool that, when running, **holds your model-provider API
+`parcus` is a local development tool that, when running, **holds your model-provider API
 keys** and may cache prompt/response content. Treat security issues seriously.
 
 - Report privately via a GitHub Security Advisory (preferred) or by opening an issue marked

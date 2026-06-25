@@ -16,10 +16,10 @@ tenant identity with the ADR 0005/0006 encryption + rotation.
 ## Decision
 
 1. **Per-tenant DEKs.** In multi-tenant mode each tenant's data-encryption key is
-   `HKDF-SHA256(master_key, info="parsimony-cache-tenant:<tenant>")` — distinct per tenant, derived
+   `HKDF-SHA256(master_key, info="parcus-cache-tenant:<tenant>")` — distinct per tenant, derived
    lazily and cached. Compromising one tenant's derived key doesn't expose another's. Single-tenant
    mode keeps the single-key path unchanged (no HKDF) for backward compatibility.
-2. **Crypto-shredding by withheld key.** Listing a tenant in `PARSIMONY_CACHE_SHREDDED_TENANTS`
+2. **Crypto-shredding by withheld key.** Listing a tenant in `PARCUS_CACHE_SHREDDED_TENANTS`
    makes the provider return **no cipher** for it (`for_tenant → None`): its existing ciphertext
    becomes immediately inaccessible (reads miss, writes are skipped) — logical erasure **without
    scanning or deleting rows**; the orphaned bodies age out by TTL. Requires encryption +

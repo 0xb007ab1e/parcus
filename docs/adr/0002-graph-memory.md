@@ -6,7 +6,7 @@
 
 ## Context
 
-`parsimony` cuts tokens two ways: compress the outbound request (M1/M2) and *avoid resending
+`parcus` cuts tokens two ways: compress the outbound request (M1/M2) and *avoid resending
 context*. The latter is the graph-memory work (PLAN §5), with three tracks:
 
 - **A — Response cache** (shipped in M1): skip a call entirely on an exact/normalized-hash hit.

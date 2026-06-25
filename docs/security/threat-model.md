@@ -1,4 +1,4 @@
-# Threat Model — parsimony proxy
+# Threat Model — parcus proxy
 
 STRIDE over the proxy's data-flow. Revisit when trust boundaries change (e.g. enabling the
 hosted/shared mode). Method per `@rules/workflow-threat-model.md`.
@@ -6,7 +6,7 @@ hosted/shared mode). Method per `@rules/workflow-threat-model.md`.
 ## 1. System & data-flow
 
 ```
-[Harness on host] --(1)--> [parsimony proxy] --(2)--> [Provider API (Anthropic/OpenAI)]
+[Harness on host] --(1)--> [parcus proxy] --(2)--> [Provider API (Anthropic/OpenAI)]
                                   |
                                   +--(3)--> [Local store: SQLite cache + graph]  (at rest)
 ```

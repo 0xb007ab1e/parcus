@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from parsimony.cache import SqliteCache, SystemClock
-from parsimony.model import CachedResponse
+from parcus.cache import SqliteCache, SystemClock
+from parcus.model import CachedResponse
 
 
 class FakeClock:

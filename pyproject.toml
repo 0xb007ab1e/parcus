@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "parsimony"
+name = "parcus"
 version = "0.1.0"
 description = "Local-first, token-thrift inference proxy for agentic harnesses."
 readme = "README.md"
@@ -47,10 +47,10 @@ dev = [
 ]
 
 [project.scripts]
-parsimony = "parsimony.cli:main"
+parcus = "parcus.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/parsimony"]
+packages = ["src/parcus"]
 
 # ---------------------------------------------------------------------------
 # Ruff — lint + format + docstring enforcement (docs mandate §1)
@@ -107,11 +107,11 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "--cov=parsimony --cov-branch --cov-report=term-missing --cov-fail-under=90"
+addopts = "--cov=parcus --cov-branch --cov-report=term-missing --cov-fail-under=90"
 
 [tool.coverage.run]
 branch = true
-source = ["parsimony"]
+source = ["parcus"]
 
 [tool.coverage.report]
 show_missing = true

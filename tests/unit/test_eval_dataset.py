@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from parsimony.eval import load_jsonl
-from parsimony.model import Dialect
+from parcus.eval import load_jsonl
+from parcus.model import Dialect
 
 
 def test_loads_and_infers_dialects(tmp_path: Path) -> None:

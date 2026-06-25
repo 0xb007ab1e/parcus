@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from parsimony.model import Dialect, Role
-from parsimony.proxy.dialects import detect, parse, serialize
+from parcus.model import Dialect, Role
+from parcus.proxy.dialects import detect, parse, serialize
 
 
 class TestDetect:

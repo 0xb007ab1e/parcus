@@ -1,6 +1,6 @@
 # gitleaks configuration — secret-scan gate (workflow-cicd, master §1).
 # Extends the built-in rules; allowlists only intentional, fake test fixtures.
-title = "parsimony gitleaks config"
+title = "parcus gitleaks config"
 
 [extend]
 useDefault = true

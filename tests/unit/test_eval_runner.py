@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from parsimony.eval import BUILTIN_SAMPLES, evaluate
-from parsimony.model import CanonicalRequest, CompressionStats
+from parcus.eval import BUILTIN_SAMPLES, evaluate
+from parcus.model import CanonicalRequest, CompressionStats
 
 
 class DropMessageCompressor:

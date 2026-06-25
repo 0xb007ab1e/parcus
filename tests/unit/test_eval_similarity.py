@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from parsimony.eval import BUILTIN_SIMILARITY_SAMPLES, SimilaritySample, evaluate_similarity
+from parcus.eval import BUILTIN_SIMILARITY_SAMPLES, SimilaritySample, evaluate_similarity
 
 
 def test_lexical_embedder_fails_the_adversarial_set() -> None:

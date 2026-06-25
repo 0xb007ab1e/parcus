@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from parsimony.cache import CachePolicy, NullCache
-from parsimony.compress import FillerCompressor, LosslessCompressor
-from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
-from parsimony.obs import AggregateSink, SavingsEvent, StageStat
-from parsimony.proxy.engine import EngineConfig, ProxyEngine
-from parsimony.proxy.upstream import UpstreamRequest, UpstreamResponse
-from parsimony.redact import Redactor
+from parcus.cache import CachePolicy, NullCache
+from parcus.compress import FillerCompressor, LosslessCompressor
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
+from parcus.obs import AggregateSink, SavingsEvent, StageStat
+from parcus.proxy.engine import EngineConfig, ProxyEngine
+from parcus.proxy.upstream import UpstreamRequest, UpstreamResponse
+from parcus.redact import Redactor
 
 
 def _req(text: str) -> CanonicalRequest:

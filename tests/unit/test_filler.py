@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from parsimony.compress.filler import (
+from parcus.compress.filler import (
     AGGRESSIVE_FILLERS,
     DEFAULT_FILLERS,
     FillerCompressor,
     strip_fillers,
 )
-from parsimony.eval import is_filler_equivalent
-from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
+from parcus.eval import is_filler_equivalent
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
 
 
 def _req(*spans: Span, system: str | None = None) -> CanonicalRequest:

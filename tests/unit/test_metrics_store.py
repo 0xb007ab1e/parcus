@@ -6,7 +6,7 @@ import os
 import stat
 from pathlib import Path
 
-from parsimony.obs import SavingsEvent, SqliteMetricsSink, StageStat, render_stats
+from parcus.obs import SavingsEvent, SqliteMetricsSink, StageStat, render_stats
 
 
 def _event(stages: tuple[StageStat, ...], *, cache: str = "miss", tenant: str = "") -> SavingsEvent:

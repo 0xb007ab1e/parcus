@@ -1,4 +1,4 @@
-# parsimony
+# parcus
 
 **A local-first, token-thrift inference proxy for agentic harnesses** (Claude Code, pi,
 opencode, …). Its sole purpose: **reduce the tokens spent per turn** to preserve your budget,
@@ -8,14 +8,14 @@ while **preserving the semantic meaning** the model needs to stay correct.
 > lossless compression (incl. the system prompt), an exact-hash response cache with secret
 > redaction, and a token-savings eval harness with a model-free lossless no-regression gate.
 > **M2 complete:** Tier-1 **filler removal** — opt-in (off by default), with a model-free
-> guardrail (only allow-listed filler tokens may be removed) and `parsimony eval --filler` —
+> guardrail (only allow-listed filler tokens may be removed) and `parcus eval --filler` —
 > plus **per-request savings observability** (structured JSON logs of token/cache outcomes,
 > content-free). Next: **M3+ graph memory** (context retrieval, conversation compaction). See
 > [`PLAN.md`](PLAN.md).
 
 ## How it works
 
-`parsimony` sits transparently between your harness and the model provider. Point your
+`parcus` sits transparently between your harness and the model provider. Point your
 harness's base URL at the local proxy; it forwards to the real Anthropic / OpenAI endpoint,
 and along the way:
 
@@ -39,23 +39,23 @@ pip install -e ".[dev]"
 
 # run the proxy (binds 127.0.0.1; refuses 0.0.0.0/public — set --host to a tailnet IP for
 # other devices)
-parsimony serve --port 8787
+parcus serve --port 8787
 
 # point your harness at it
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
 export OPENAI_BASE_URL=http://127.0.0.1:8787/v1
 
 # measure token savings (+ lossless no-regression check) over the built-in corpus or your own
-parsimony eval                       # built-in samples
-parsimony eval benchmarks/samples.jsonl
-parsimony eval --record              # also persist the gate result for `stats`
+parcus eval                       # built-in samples
+parcus eval benchmarks/samples.jsonl
+parcus eval --record              # also persist the gate result for `stats`
 
 # aggregated per-stage reduction + accuracy (live invariant pass-rate + eval gates)
-parsimony stats                      # or GET http://127.0.0.1:8787/__parsimony__/stats
+parcus stats                      # or GET http://127.0.0.1:8787/__parcus__/stats
 ```
 
 While serving, each turn's per-stage reduction and accuracy (the model-free invariant
-pass-rate) are recorded; `parsimony stats` and the `/__parsimony__/stats` JSON endpoint report
+pass-rate) are recorded; `parcus stats` and the `/__parcus__/stats` JSON endpoint report
 them alongside the offline eval-gate scores.
 
 From a phone/other tailnet device: `http://<host>:8787` (MagicDNS name). Note: to serve both

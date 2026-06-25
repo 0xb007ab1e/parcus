@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from parsimony.cache import CachePolicy
-from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
+from parcus.cache import CachePolicy
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
 
 
 def _req(text: str) -> CanonicalRequest:

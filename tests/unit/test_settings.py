@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from parsimony.config import Settings
+from parcus.config import Settings
 
 
 def test_secure_defaults() -> None:

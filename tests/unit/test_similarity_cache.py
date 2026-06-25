@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from parsimony.cache import SimilarityCache
+from parcus.cache import SimilarityCache
 
 
 class _StubEmbedder:

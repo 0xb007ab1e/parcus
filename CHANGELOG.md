@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to parsimony are documented here. Format follows
+All notable changes to parcus are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com); versioning is [SemVer](https://semver.org).
 
 ## [0.1.0] - 2026-06-25
@@ -20,14 +20,14 @@ cache; single-user local behaviour is the default and security controls fail clo
   safe local embedder by default).
 - **Graph memory** — context-retrieval (Track B) and rolling-summary compaction (Track C),
   off by default, behind a retrieval-recall gate; local embedders; SQLite persistence.
-- **Observability** — per-stage reduction + accuracy, persistent metrics, `parsimony stats`,
+- **Observability** — per-stage reduction + accuracy, persistent metrics, `parcus stats`,
   JSON + Prometheus endpoints, health endpoint; per-tenant attribution.
 - **Hosted/multi-tenant mode** — server-side tenant isolation (cache, memory), edge
   authorization allow-list, per-tenant token-bucket rate limiting.
 - **At-rest cache encryption** — AES-256-GCM (AEAD), graceful key rotation, per-tenant derived
   keys (DEKs) + crypto-shredding.
 - **Eval harness** — token-reduction metrics with model-free + judge-based gates
-  (`parsimony eval [--filler|--retrieval|--similarity]`).
+  (`parcus eval [--filler|--retrieval|--similarity]`).
 - **Supply chain** — CI security gates (lint, mypy-strict, bandit, tests with 100%-critical /
   ≥90% coverage, pip-audit, SBOM, gitleaks); tag-triggered signed release (SLSA provenance).
 
@@ -35,4 +35,4 @@ cache; single-user local behaviour is the default and security controls fail clo
 - Provider API keys are never logged, cached, or persisted; cache/graph data redacted before
   persist; binds loopback/tailnet only (never public). Threat model in `docs/security/`.
 
-[0.1.0]: https://github.com/0xb007ab1e/parsimony/releases/tag/v0.1.0
+[0.1.0]: https://github.com/0xb007ab1e/parcus/releases/tag/v0.1.0

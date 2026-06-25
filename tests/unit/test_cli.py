@@ -8,9 +8,9 @@ import pytest
 from fastapi import FastAPI
 from pydantic import ValidationError
 
-from parsimony import cli
-from parsimony.compress import ChainCompressor, NullCompressor
-from parsimony.config import Settings
+from parcus import cli
+from parcus.compress import ChainCompressor, NullCompressor
+from parcus.config import Settings
 
 
 def test_build_app_returns_fastapi_instance() -> None:
@@ -57,7 +57,7 @@ def test_eval_aggressive_filler_runs_and_passes_guardrail(
 
 
 def test_build_engine_uses_aggressive_fillers_when_configured() -> None:
-    from parsimony.compress import AGGRESSIVE_FILLERS, FillerCompressor
+    from parcus.compress import AGGRESSIVE_FILLERS, FillerCompressor
 
     engine = cli.build_engine(
         Settings(
@@ -96,7 +96,7 @@ def test_build_engine_uses_null_when_no_passes() -> None:
 def test_build_engine_wires_learned_tier_when_enabled() -> None:
     # learned=True appends the Tier-2 LearnedCompressor (model loads lazily, so no extra needed
     # to construct it). With lossless also on, that's a chain.
-    from parsimony.compress import ChainCompressor, LearnedCompressor
+    from parcus.compress import ChainCompressor, LearnedCompressor
 
     engine = cli.build_engine(Settings(_env_file=None, cache=False, metrics=False, learned=True))
     assert isinstance(engine._compressor, ChainCompressor)
@@ -142,7 +142,7 @@ def test_build_engine_has_no_similarity_by_default() -> None:
 def test_build_engine_wraps_cache_in_encryption_when_enabled() -> None:
     import base64
 
-    from parsimony.cache.encryption import EncryptedCache
+    from parcus.cache.encryption import EncryptedCache
 
     key = base64.b64encode(b"\x02" * 32).decode()
     engine = cli.build_engine(
@@ -152,7 +152,7 @@ def test_build_engine_wraps_cache_in_encryption_when_enabled() -> None:
 
 
 def test_build_engine_cache_unencrypted_by_default() -> None:
-    from parsimony.cache import SqliteCache
+    from parcus.cache import SqliteCache
 
     engine = cli.build_engine(Settings(_env_file=None, metrics=False))
     assert isinstance(engine._cache, SqliteCache)
@@ -161,7 +161,7 @@ def test_build_engine_cache_unencrypted_by_default() -> None:
 def test_build_engine_uses_per_tenant_dek_in_multi_tenant_mode() -> None:
     import base64
 
-    from parsimony.cache.encryption import EncryptedCache, TenantCipherProvider
+    from parcus.cache.encryption import EncryptedCache, TenantCipherProvider
 
     key = base64.b64encode(b"\x05" * 32).decode()
     engine = cli.build_engine(
@@ -190,7 +190,7 @@ def test_eval_similarity_command_runs(capsys: pytest.CaptureFixture[str]) -> Non
 def test_stats_command_runs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setenv("PARSIMONY_METRICS_PATH", str(tmp_path / "m.sqlite"))
+    monkeypatch.setenv("PARCUS_METRICS_PATH", str(tmp_path / "m.sqlite"))
     assert cli.main(["stats"]) == 0  # empty store still renders
     assert "requests=" in capsys.readouterr().out
 
@@ -198,7 +198,7 @@ def test_stats_command_runs(
 def test_eval_record_then_stats_shows_gate(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setenv("PARSIMONY_METRICS_PATH", str(tmp_path / "m.sqlite"))
+    monkeypatch.setenv("PARCUS_METRICS_PATH", str(tmp_path / "m.sqlite"))
     assert cli.main(["eval", "--record"]) == 0
     capsys.readouterr()  # discard eval output
     cli.main(["stats"])
@@ -218,10 +218,10 @@ def test_serve_rejects_public_bind() -> None:
 def test_tenant_id_from_env_matches_derivation(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from parsimony.tenant import derive_tenant
+    from parcus.tenant import derive_tenant
 
-    monkeypatch.setenv("PARSIMONY_TENANT_CREDENTIAL", "sk-live-key")
-    monkeypatch.delenv("PARSIMONY_SALT", raising=False)
+    monkeypatch.setenv("PARCUS_TENANT_CREDENTIAL", "sk-live-key")
+    monkeypatch.delenv("PARCUS_SALT", raising=False)
     rc = cli.main(["tenant-id"])
     assert rc == 0
     printed = capsys.readouterr().out.strip()
@@ -232,7 +232,7 @@ def test_tenant_id_from_env_matches_derivation(
 def test_tenant_id_missing_credential_fails(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.delenv("PARSIMONY_TENANT_CREDENTIAL", raising=False)
+    monkeypatch.delenv("PARCUS_TENANT_CREDENTIAL", raising=False)
     monkeypatch.setattr("sys.stdin.readline", lambda: "")  # empty stdin
     rc = cli.main(["tenant-id"])
     assert rc == 1

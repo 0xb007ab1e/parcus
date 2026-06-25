@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from parsimony.memory.compaction import compact_with_memory
-from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
+from parcus.memory.compaction import compact_with_memory
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
 
 
 class FakeMemory:

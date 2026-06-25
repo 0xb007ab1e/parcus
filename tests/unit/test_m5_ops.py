@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from parsimony.compress import FillerCompressor, LosslessCompressor
-from parsimony.compress.sampling import VerifySampler
-from parsimony.eval import BUILTIN_RETRIEVAL_SAMPLES, evaluate_retrieval
-from parsimony.memory import HashingEmbedder
-from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
-from parsimony.obs import render_prometheus
+from parcus.compress import FillerCompressor, LosslessCompressor
+from parcus.compress.sampling import VerifySampler
+from parcus.eval import BUILTIN_RETRIEVAL_SAMPLES, evaluate_retrieval
+from parcus.memory import HashingEmbedder
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
+from parcus.obs import render_prometheus
 
 
 def _req(text: str) -> CanonicalRequest:
@@ -77,13 +77,13 @@ class TestRenderPrometheus:
             "evals": {"retrieval": {"score": 0.95, "passed": True}},
         }
         text = render_prometheus(snapshot)
-        assert "parsimony_requests_total 3" in text
-        assert 'parsimony_stage_reduction_ratio{stage="lossless"} 0.2' in text
-        assert 'parsimony_stage_accuracy_ratio{stage="lossless"} 1.0' in text
+        assert "parcus_requests_total 3" in text
+        assert 'parcus_stage_reduction_ratio{stage="lossless"} 0.2' in text
+        assert 'parcus_stage_accuracy_ratio{stage="lossless"} 1.0' in text
         # memory has no accuracy -> no accuracy series for it
-        assert 'parsimony_stage_accuracy_ratio{stage="memory"}' not in text
-        assert 'parsimony_eval_passed{kind="retrieval"} 1' in text
-        assert "# TYPE parsimony_requests_total counter" in text
+        assert 'parcus_stage_accuracy_ratio{stage="memory"}' not in text
+        assert 'parcus_eval_passed{kind="retrieval"} 1' in text
+        assert "# TYPE parcus_requests_total counter" in text
 
     def test_empty_snapshot_minimal(self) -> None:
         text = render_prometheus(
@@ -96,7 +96,7 @@ class TestRenderPrometheus:
                 "evals": {},
             }
         )
-        assert "parsimony_requests_total 0" in text
+        assert "parcus_requests_total 0" in text
 
 
 class TestEmbedderBenchmark:

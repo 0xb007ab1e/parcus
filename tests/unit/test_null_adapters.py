@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from parsimony.cache import NullCache
-from parsimony.compress import NullCompressor
-from parsimony.model import CachedResponse, CanonicalRequest, Dialect
+from parcus.cache import NullCache
+from parcus.compress import NullCompressor
+from parcus.model import CachedResponse, CanonicalRequest, Dialect
 
 
 def test_null_compressor_returns_request_unchanged() -> None:

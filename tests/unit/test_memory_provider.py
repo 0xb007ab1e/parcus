@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from parsimony.memory import (
+from parcus.memory import (
     GraphMemory,
     PerTenantMemoryProvider,
     SharedMemoryProvider,
 )
-from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
 
 
 def _request(text: str) -> CanonicalRequest:

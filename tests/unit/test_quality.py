@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from parsimony.eval.quality import KeywordRecallJudge, LLMJudge, QualityJudge
+from parcus.eval.quality import KeywordRecallJudge, LLMJudge, QualityJudge
 
 
 class TestKeywordRecallJudge:

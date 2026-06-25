@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from parsimony.quota import RateLimit, RateLimiter
+from parcus.quota import RateLimit, RateLimiter
 
 
 class _FakeClock:

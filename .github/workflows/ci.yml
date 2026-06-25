@@ -52,11 +52,11 @@ jobs:
       - name: Critical-path coverage gate (100%)
         run: |
           pytest -o addopts="" \
-            --cov=parsimony.compress --cov=parsimony.model --cov=parsimony.spans \
-            --cov=parsimony.cache.key --cov=parsimony.cache.policy --cov=parsimony.redact \
-            --cov=parsimony.invariants --cov=parsimony.eval.equivalence --cov=parsimony.eval.quality \
-            --cov=parsimony.memory.compaction --cov=parsimony.memory.provider --cov=parsimony.tenant \
-            --cov=parsimony.quota --cov=parsimony.cache.similarity --cov=parsimony.cache.encryption \
+            --cov=parcus.compress --cov=parcus.model --cov=parcus.spans \
+            --cov=parcus.cache.key --cov=parcus.cache.policy --cov=parcus.redact \
+            --cov=parcus.invariants --cov=parcus.eval.equivalence --cov=parcus.eval.quality \
+            --cov=parcus.memory.compaction --cov=parcus.memory.provider --cov=parcus.tenant \
+            --cov=parcus.quota --cov=parcus.cache.similarity --cov=parcus.cache.encryption \
             --cov-branch --cov-fail-under=100 -q
 
       - name: Dependency audit (SCA)

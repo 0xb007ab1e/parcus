@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 import respx
 
-from parsimony.proxy.upstream import HttpxUpstream, UpstreamRequest
+from parcus.proxy.upstream import HttpxUpstream, UpstreamRequest
 
 
 @respx.mock

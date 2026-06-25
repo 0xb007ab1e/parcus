@@ -1,4 +1,4 @@
-# parsimony — Plan
+# parcus — Plan
 
 A **local-first, token-thrift inference proxy** for agentic harnesses (Claude Code, pi,
 opencode, …). Its sole purpose is to **reduce tokens spent per turn** — preserving the end
@@ -68,7 +68,7 @@ Business logic is pure and provider-agnostic; I/O lives at the edges (`topic-arc
 `topic-dependency-injection`). This is what keeps it hosted-ready without building hosting now.
 
 ```
-        harness                         parsimony proxy (imperative shell)                    provider
+        harness                         parcus proxy (imperative shell)                    provider
    ┌──────────────┐   HTTP    ┌───────────────────────────────────────────────┐   HTTP   ┌────────────┐
    │ Claude Code  │ ───────▶  │  ingress (FastAPI)                             │ ──────▶  │ Anthropic  │
    │ pi / opencode│           │   │ dialect-detect → canonical request model   │          │ OpenAI     │

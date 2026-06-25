@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from parsimony.memory.summary import ExtractiveSummarizer, LLMSummarizer, Summarizer
+from parcus.memory.summary import ExtractiveSummarizer, LLMSummarizer, Summarizer
 
 
 class TestExtractiveSummarizer:

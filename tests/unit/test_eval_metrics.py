@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from parsimony.eval.metrics import EvalReport, SampleResult
+from parcus.eval.metrics import EvalReport, SampleResult
 
 
 class TestSampleResult:

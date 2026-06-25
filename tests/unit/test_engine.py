@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 
-from parsimony.cache import CachePolicy, SqliteCache
-from parsimony.compress import LosslessCompressor
-from parsimony.model import CanonicalRequest, CompressionStats
-from parsimony.proxy.engine import EngineConfig, ProxyEngine
-from parsimony.proxy.upstream import UpstreamRequest, UpstreamResponse
-from parsimony.redact import Redactor
+from parcus.cache import CachePolicy, SqliteCache
+from parcus.compress import LosslessCompressor
+from parcus.model import CanonicalRequest, CompressionStats
+from parcus.proxy.engine import EngineConfig, ProxyEngine
+from parcus.proxy.upstream import UpstreamRequest, UpstreamResponse
+from parcus.redact import Redactor
 
 OK = UpstreamResponse(200, (("content-type", "application/json"),), b'{"r":1}')
 
@@ -194,7 +194,7 @@ class TestMetrics:
         assert spy.events[0].request_id  # a non-empty generated id
 
     async def test_event_carries_tenant_in_multi_tenant_mode(self) -> None:
-        from parsimony.tenant import derive_tenant
+        from parcus.tenant import derive_tenant
 
         spy = SpySink()
         eng = _engine(FakeUpstream(), cache_enabled=False, multi_tenant=True, metrics=spy)
@@ -248,7 +248,7 @@ class TestEdgeAuthorization:
     """Hosted mode: an optional allow-list authorizes callers before forwarding (fail closed)."""
 
     async def test_listed_tenant_is_forwarded(self) -> None:
-        from parsimony.tenant import derive_tenant
+        from parcus.tenant import derive_tenant
 
         up = FakeUpstream()
         allowed = frozenset({derive_tenant([("x-api-key", "good-key")])})
@@ -260,7 +260,7 @@ class TestEdgeAuthorization:
         assert up.calls == 1
 
     async def test_unlisted_tenant_gets_401_without_upstream(self) -> None:
-        from parsimony.tenant import derive_tenant
+        from parcus.tenant import derive_tenant
 
         up = FakeUpstream()
         allowed = frozenset({derive_tenant([("x-api-key", "good-key")])})
@@ -299,7 +299,7 @@ class TestRateLimiting:
     """A per-tenant rate limiter sheds over-limit requests with 429 before any upstream call."""
 
     async def test_over_limit_request_gets_429_with_retry_after(self) -> None:
-        from parsimony.quota import RateLimit, RateLimiter
+        from parcus.quota import RateLimit, RateLimiter
 
         up = FakeUpstream()
         limiter = RateLimiter(RateLimit(capacity=1, refill_per_sec=1.0))
@@ -314,7 +314,7 @@ class TestRateLimiting:
         assert up.calls == 1  # the limited request never reached the provider
 
     async def test_rate_limit_is_per_tenant(self) -> None:
-        from parsimony.quota import RateLimit, RateLimiter
+        from parcus.quota import RateLimit, RateLimiter
 
         up = FakeUpstream()
         limiter = RateLimiter(RateLimit(capacity=1, refill_per_sec=1.0))
@@ -346,7 +346,7 @@ class TestSimilarityCache:
     """Opt-in semantic cache: serve a near-duplicate's response on an exact miss."""
 
     async def test_near_duplicate_served_without_upstream(self) -> None:
-        from parsimony.cache import SimilarityCache
+        from parcus.cache import SimilarityCache
 
         up = FakeUpstream()
         sim = SimilarityCache(_MarkerEmbedder(), threshold=0.97)
@@ -363,7 +363,7 @@ class TestSimilarityCache:
         assert second.content == first.content
 
     async def test_dissimilar_request_forwards(self) -> None:
-        from parsimony.cache import SimilarityCache
+        from parcus.cache import SimilarityCache
 
         up = FakeUpstream()
         sim = SimilarityCache(_MarkerEmbedder(), threshold=0.97)

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from parsimony.ports import TokenizerPort
-from parsimony.tokenize import HeuristicTokenizer, default_tokenizer
+from parcus.ports import TokenizerPort
+from parcus.tokenize import HeuristicTokenizer, default_tokenizer
 
 
 class TestHeuristicTokenizer:

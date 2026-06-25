@@ -10,7 +10,7 @@
 *.sqlite3
 *.db
 data/
-.parsimony/
+.parcus/
 .cache/
 
 # --- python ---

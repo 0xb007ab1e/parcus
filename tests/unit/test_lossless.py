@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from parsimony.compress.lossless import (
+from parcus.compress.lossless import (
     LosslessCompressor,
     normalise_code_aware,
     normalise_whitespace,
 )
-from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
 
 
 def _req(*spans: Span, system: str | None = None) -> CanonicalRequest:

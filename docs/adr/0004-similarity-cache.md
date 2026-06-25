@@ -14,7 +14,7 @@ needs strong guards (master "correctness is the gate; tokens are the objective")
 
 ## Decision
 
-1. **Off by default; high threshold.** `PARSIMONY_SIMILARITY_CACHE=false`; default cosine
+1. **Off by default; high threshold.** `PARCUS_SIMILARITY_CACHE=false`; default cosine
    threshold `0.97` (near-duplicate only). It widens, never replaces, the exact cache — exact
    hits are checked first; similarity is consulted only on an exact miss.
 2. **Index keys, not bodies.** `SimilarityCache` stores `(vector, exact-key, model, tenant)`
@@ -33,7 +33,7 @@ needs strong guards (master "correctness is the gate; tokens are the objective")
    closed at startup**. There is no remote embedder — a cache that called a remote embedding API
    would defeat the project's purpose. *(Update: the original slice defaulted to `hashing`; the
    default was flipped to `local` once the lexical-embedder limitation below was confirmed.)*
-5. **A precision gate is the pre-flight.** `parsimony eval --similarity` scores a labelled set of
+5. **A precision gate is the pre-flight.** `parcus eval --similarity` scores a labelled set of
    (anchor, variant, should-hit) pairs and **fails on any false hit** (precision < 1.0). A missed
    paraphrase is lost savings; a served non-paraphrase is a correctness bug — so the gate
    optimises for zero false hits. Operators must pass it with their chosen embedder/threshold
@@ -46,7 +46,7 @@ Running the gate surfaced a real limitation: the dependency-free `HashingEmbedde
 distinguish requests that differ only in numbers or entities** — e.g. "scale the service to 10
 replicas" vs "…2 replicas" embed identically and score cosine **1.0**, a false hit at any
 threshold. The built-in adversarial set fails the gate with the lexical embedder **by design**
-(so `parsimony eval --similarity` exits non-zero out of the box), signalling that:
+(so `parcus eval --similarity` exits non-zero out of the box), signalling that:
 
 - **Lexical similarity is not safe for response caching.** The safe choice is the **local
   sentence-transformer** embedder, validated via the gate.

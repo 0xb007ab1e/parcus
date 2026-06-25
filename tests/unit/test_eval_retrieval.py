@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from parsimony.eval.retrieval import (
+from parcus.eval.retrieval import (
     BUILTIN_RETRIEVAL_SAMPLES,
     RetrievalReport,
     RetrievalSample,

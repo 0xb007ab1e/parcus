@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from parsimony.cache import compute_key
-from parsimony.cache.key import KEY_VERSION
-from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
+from parcus.cache import compute_key
+from parcus.cache.key import KEY_VERSION
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
 
 
 def _req(text: str, *, model: str = "m", stream: bool = False) -> CanonicalRequest:

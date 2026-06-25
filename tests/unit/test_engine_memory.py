@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import json
 
-from parsimony import cli
-from parsimony.cache import CachePolicy, NullCache
-from parsimony.compress import LosslessCompressor
-from parsimony.config import Settings
-from parsimony.model import CanonicalRequest
-from parsimony.proxy.engine import EngineConfig, ProxyEngine
-from parsimony.proxy.upstream import UpstreamRequest, UpstreamResponse
-from parsimony.redact import Redactor
+from parcus import cli
+from parcus.cache import CachePolicy, NullCache
+from parcus.compress import LosslessCompressor
+from parcus.config import Settings
+from parcus.model import CanonicalRequest
+from parcus.proxy.engine import EngineConfig, ProxyEngine
+from parcus.proxy.upstream import UpstreamRequest, UpstreamResponse
+from parcus.redact import Redactor
 
 OK = UpstreamResponse(200, (("content-type", "application/json"),), b"{}")
 
@@ -118,7 +118,7 @@ class TestCliMemoryWiring:
         assert eng._memory_provider.for_tenant("") is None
 
     def test_build_engine_uses_per_tenant_provider_in_multi_tenant_mode(self) -> None:
-        from parsimony.memory import PerTenantMemoryProvider
+        from parcus.memory import PerTenantMemoryProvider
 
         eng = cli.build_engine(
             Settings(_env_file=None, cache=False, metrics=False, memory=True, multi_tenant=True)
@@ -132,7 +132,7 @@ class TestPerTenantMemoryRouting:
     """In multi-tenant mode the engine ingests into the requesting tenant's own graph."""
 
     async def test_ingest_routed_to_separate_tenant_memories(self) -> None:
-        from parsimony.memory import PerTenantMemoryProvider
+        from parcus.memory import PerTenantMemoryProvider
 
         built: list[FakeMemory] = []
 

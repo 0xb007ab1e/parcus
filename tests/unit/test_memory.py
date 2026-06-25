@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from parsimony.memory import (
+from parcus.memory import (
     GraphMemory,
     InMemoryGraphStore,
     MemoryEdge,
@@ -14,8 +14,8 @@ from parsimony.memory import (
     node_id,
     relevant,
 )
-from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
-from parsimony.ports import MemoryPort
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
+from parcus.ports import MemoryPort
 
 
 def _req(*texts: str, system: str | None = None) -> CanonicalRequest:

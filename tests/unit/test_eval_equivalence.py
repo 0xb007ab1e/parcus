@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from parsimony.eval.equivalence import (
+from parcus.eval.equivalence import (
     is_lossless_equivalent,
     lossless_violations,
     word_sequence_equal,
 )
-from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
 
 
 def _req(*messages: Message, system: str | None = None) -> CanonicalRequest:

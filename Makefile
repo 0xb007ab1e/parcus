@@ -1,4 +1,4 @@
-# parsimony — developer task runner. Same commands locally and in CI.
+# parcus — developer task runner. Same commands locally and in CI.
 .DEFAULT_GOAL := help
 VENV := .venv
 PY := $(VENV)/bin/python
@@ -39,23 +39,23 @@ test: ## Run tests with the >=90% line+branch coverage gate
 
 cov-critical: ## Enforce 100% coverage on critical paths (transform/decision/detection core)
 	$(PY) -m pytest -o addopts="" \
-	  --cov=parsimony.compress --cov=parsimony.model --cov=parsimony.spans \
-	  --cov=parsimony.cache.key --cov=parsimony.cache.policy --cov=parsimony.redact \
-	  --cov=parsimony.invariants --cov=parsimony.eval.equivalence --cov=parsimony.eval.quality \
-	  --cov=parsimony.memory.compaction --cov=parsimony.memory.provider --cov=parsimony.tenant \
-	  --cov=parsimony.quota --cov=parsimony.cache.similarity --cov=parsimony.cache.encryption \
+	  --cov=parcus.compress --cov=parcus.model --cov=parcus.spans \
+	  --cov=parcus.cache.key --cov=parcus.cache.policy --cov=parcus.redact \
+	  --cov=parcus.invariants --cov=parcus.eval.equivalence --cov=parcus.eval.quality \
+	  --cov=parcus.memory.compaction --cov=parcus.memory.provider --cov=parcus.tenant \
+	  --cov=parcus.quota --cov=parcus.cache.similarity --cov=parcus.cache.encryption \
 	  --cov-branch --cov-fail-under=100 --cov-report=term-missing
 
 eval: ## Measure token savings + lossless equivalence over the built-in corpus
-	$(PY) -m parsimony.cli eval
+	$(PY) -m parcus.cli eval
 
 docs: ## Generate API docs (pdoc)
-	$(VENV)/bin/pdoc -o site parsimony
+	$(VENV)/bin/pdoc -o site parcus
 
 check: lint typecheck security test cov-critical ## Everything CI runs
 
 serve: ## Run the proxy locally (loopback + tailnet)
-	$(PY) -m parsimony.cli serve
+	$(PY) -m parcus.cli serve
 
 clean: ## Remove caches and build artifacts
 	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage site build dist

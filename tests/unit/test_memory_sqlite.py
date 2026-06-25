@@ -6,7 +6,7 @@ import os
 import stat
 from pathlib import Path
 
-from parsimony.memory import (
+from parcus.memory import (
     GraphMemory,
     GraphStore,
     MemoryEdge,
@@ -15,7 +15,7 @@ from parsimony.memory import (
     SqliteGraphStore,
     ingest_request,
 )
-from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
 
 
 def _node(text: str, terms: frozenset[str]) -> MemoryNode:

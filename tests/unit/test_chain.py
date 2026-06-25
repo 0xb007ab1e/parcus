@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from parsimony.compress import ChainCompressor, FillerCompressor, LosslessCompressor
-from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
+from parcus.compress import ChainCompressor, FillerCompressor, LosslessCompressor
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
 
 
 def _req(text: str, *, system: str | None = None) -> CanonicalRequest:

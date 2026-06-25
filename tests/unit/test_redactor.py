@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from parsimony.redact import Redactor, placeholder_for
+from parcus.redact import Redactor, placeholder_for
 
 ANTHROPIC = "sk-ant-api03-" + "A" * 24
 OPENAI = "sk-" + "B" * 24

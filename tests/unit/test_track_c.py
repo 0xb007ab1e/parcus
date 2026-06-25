@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 
-from parsimony.cache import CachePolicy, NullCache
-from parsimony.compress import LosslessCompressor
-from parsimony.memory.compaction import compact_by_summary
-from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
-from parsimony.proxy.engine import EngineConfig, ProxyEngine
-from parsimony.proxy.upstream import UpstreamRequest, UpstreamResponse
-from parsimony.redact import Redactor
+from parcus.cache import CachePolicy, NullCache
+from parcus.compress import LosslessCompressor
+from parcus.memory.compaction import compact_by_summary
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
+from parcus.proxy.engine import EngineConfig, ProxyEngine
+from parcus.proxy.upstream import UpstreamRequest, UpstreamResponse
+from parcus.redact import Redactor
 
 OK = UpstreamResponse(200, (("content-type", "application/json"),), b"{}")
 

@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from parsimony.compress import (
+from parcus.compress import (
     DEFAULT_FILLERS,
     ChainCompressor,
     FillerCompressor,
     LosslessCompressor,
 )
-from parsimony.eval import evaluate, is_filler_equivalent
-from parsimony.eval.dataset import Sample
-from parsimony.eval.equivalence import filler_violations, removed_only_allowed
-from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
+from parcus.eval import evaluate, is_filler_equivalent
+from parcus.eval.dataset import Sample
+from parcus.eval.equivalence import filler_violations, removed_only_allowed
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
 
 ALLOWED = frozenset({"please", "just", "really"})
 

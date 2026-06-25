@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from parsimony.spans import classify_spans
+from parcus.spans import classify_spans
 
 
 def _reassemble(text: str) -> str:

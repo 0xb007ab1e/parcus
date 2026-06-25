@@ -6,12 +6,12 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from parsimony.cache import CachePolicy, NullCache
-from parsimony.compress import LosslessCompressor
-from parsimony.proxy import create_app
-from parsimony.proxy.engine import EngineConfig, ProxyEngine
-from parsimony.proxy.upstream import UpstreamRequest, UpstreamResponse
-from parsimony.redact import Redactor
+from parcus.cache import CachePolicy, NullCache
+from parcus.compress import LosslessCompressor
+from parcus.proxy import create_app
+from parcus.proxy.engine import EngineConfig, ProxyEngine
+from parcus.proxy.upstream import UpstreamRequest, UpstreamResponse
+from parcus.redact import Redactor
 
 
 class _FakeUpstream:
@@ -60,21 +60,21 @@ def _engine() -> ProxyEngine:
 
 def test_stats_endpoint_returns_snapshot() -> None:
     with TestClient(create_app(_engine(), stats_source=_FakeStats())) as client:
-        response = client.get("/__parsimony__/stats")
+        response = client.get("/__parcus__/stats")
     assert response.status_code == 200
     assert response.json()["requests"] == 7  # served locally, not forwarded upstream
 
 
 def test_stats_endpoint_empty_without_source() -> None:
     with TestClient(create_app(_engine())) as client:
-        response = client.get("/__parsimony__/stats")
+        response = client.get("/__parcus__/stats")
     assert response.status_code == 200
     assert response.json() == {}
 
 
 def test_health_endpoint() -> None:
     with TestClient(create_app(_engine())) as client:
-        response = client.get("/__parsimony__/health")
+        response = client.get("/__parcus__/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     assert "version" in response.json()
@@ -82,9 +82,9 @@ def test_health_endpoint() -> None:
 
 def test_metrics_endpoint_prometheus_format() -> None:
     with TestClient(create_app(_engine(), stats_source=_FakeStats())) as client:
-        response = client.get("/__parsimony__/metrics")
+        response = client.get("/__parcus__/metrics")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
     body = response.text
-    assert "parsimony_requests_total 7" in body
-    assert 'parsimony_stage_reduction_ratio{stage="lossless"} 0.2' in body
+    assert "parcus_requests_total 7" in body
+    assert 'parcus_stage_reduction_ratio{stage="lossless"} 0.2' in body
