@@ -55,7 +55,7 @@ jobs:
             --cov=parsimony.cache.key --cov=parsimony.cache.policy --cov=parsimony.redact \
             --cov=parsimony.invariants --cov=parsimony.eval.equivalence --cov=parsimony.eval.quality \
             --cov=parsimony.memory.compaction --cov=parsimony.memory.provider --cov=parsimony.tenant \
-            --cov=parsimony.quota --cov=parsimony.cache.similarity \
+            --cov=parsimony.quota --cov=parsimony.cache.similarity --cov=parsimony.cache.encryption \
             --cov-branch --cov-fail-under=100 -q
 
       - name: Dependency audit (SCA)

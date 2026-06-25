@@ -32,7 +32,7 @@ Processes: the proxy. Data stores: the SQLite cache/graph (confidential).
 | S1 | Spoofed client on the bind address (S) | TB1 | Bind **loopback + tailnet only**, never `0.0.0.0`/public (`topic-tailnet-dev-access`); tailnet gated by Tailscale ACLs. Hosted mode adds an optional fail-closed **edge allow-list** of credential-derived tenant ids (401 before forwarding; ADR 0003) atop the provider's own auth. |
 | S2 | Proxy forwards to a spoofed/MitM upstream (S) | TB2 | Upstream URLs are an **allow-list** of known provider hosts; TLS verification on; no following redirects to other hosts (`topic-api-consumption`, SSRF). |
 | T1 | Tampering with request alters model result (T) | proxy | **Immutable-span** classification (code/paths/quotes/tool-JSON never altered); lossy passes gated by no-regression eval; **fail open** to original request on any doubt. |
-| T2 | Tampering with cache store on disk (T) | TB3 | Store in user-owned dir, `.gitignore`d; optional at-rest encryption (M2+); integrity via normalized-key hashing. |
+| T2 | Tampering with cache store on disk (T) | TB3 | Store in user-owned `0600` dir, `.gitignore`d; **opt-in AES-256-GCM at-rest encryption** of response bodies (AEAD ⇒ tamper/relocation detected via the auth tag, cache key bound as AAD; key from env/keyfile, never VCS; enabling without a valid key fails closed; undecryptable entry ⇒ miss). See ADR 0005. |
 | R1 | Repudiation / no audit of what was changed (R) | proxy | Structured logs of transform decisions + cache hit/miss with a correlation id (redacted) (`topic-logging-observability`). |
 | I1 | **API key leak** via logs/metrics/cache (I) | TB1/TB3 | Keys **never logged, never cached, never persisted**; forwarded verbatim or injected from env/secret store only; redaction allow-list at the logging boundary (master §5, `workflow-secrets`). **Critical** severity. |
 | I2 | PII/secret in persisted cache or graph (I) | TB3 | **Redact-before-persist** (default on); TTL expiry; no-cache regex patterns; kill switch; in-memory-only mode option. |
@@ -56,7 +56,8 @@ Processes: the proxy. Data stores: the SQLite cache/graph (confidential).
 ## 5. Residual risk / decisions
 - Tailnet is multi-device but single-user for v1 → no per-request auth (accepted; revisit for
   hosted mode, which pulls in `topic-multi-tenancy` + `topic-authn-authz`).
-- At-rest encryption deferred to M2 (cache is in a user-owned, git-ignored dir on a trusted
-  host) — documented, owned, time-boxed.
+- At-rest encryption **delivered** as an opt-in AES-256-GCM layer over the response cache
+  (ADR 0005); off by default since the cache lives in a user-owned, git-ignored `0600` dir on a
+  trusted host, on by config for shared/backed-up/regulated deployments.
 
-_Last reviewed: 2026-06-24. Owner: project author._
+_Last reviewed: 2026-06-25. Owner: project author._

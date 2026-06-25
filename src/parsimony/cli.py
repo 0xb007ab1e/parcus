@@ -97,6 +97,7 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
         if settings.cache_path != ":memory:":
             Path(settings.cache_path).parent.mkdir(parents=True, exist_ok=True)
         cache = SqliteCache(path=settings.cache_path)
+        cache = _maybe_encrypt(cache, settings)
     else:
         cache = NullCache()
     policy = CachePolicy.from_patterns(
@@ -136,6 +137,22 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
         rate_limiter=rate_limiter,
         similarity=similarity,
     )
+
+
+def _maybe_encrypt(cache: CachePort, settings: Settings) -> CachePort:
+    """Wrap the cache in at-rest encryption when enabled (lazy import keeps crypto optional).
+
+    The key is validated by settings; it is present here because enabling encryption without a
+    valid key already failed closed at settings construction.
+    """
+    if not settings.cache_encryption:
+        return cache
+    from parsimony.cache.encryption import CacheCipher, EncryptedCache
+
+    key = settings.cache_encryption_key_bytes()
+    if key is None:  # defensive: settings validation already guarantees a key here (fail closed)
+        raise RuntimeError("cache encryption enabled without a valid key")
+    return EncryptedCache(cache, CacheCipher(key))
 
 
 def _build_similarity(settings: Settings) -> SimilarityCache | None:

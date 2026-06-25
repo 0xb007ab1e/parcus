@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -81,3 +83,54 @@ def test_similarity_threshold_out_of_range_rejected() -> None:
         Settings(_env_file=None, similarity_threshold=1.5)
     with pytest.raises(ValidationError):
         Settings(_env_file=None, similarity_threshold=-0.1)
+
+
+def _b64key(nbytes: int = 32) -> str:
+    import base64
+
+    return base64.b64encode(b"\x07" * nbytes).decode()
+
+
+def test_encryption_disabled_by_default() -> None:
+    s = Settings(_env_file=None)
+    assert s.cache_encryption is False
+    assert s.cache_encryption_key_bytes() is None
+
+
+def test_encryption_key_resolves_to_32_bytes() -> None:
+    s = Settings(_env_file=None, cache_encryption=True, cache_encryption_key=_b64key())
+    assert s.cache_encryption_key_bytes() == b"\x07" * 32
+
+
+def test_encryption_enabled_without_key_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, cache_encryption=True)
+
+
+def test_encryption_wrong_key_length_rejected() -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, cache_encryption=True, cache_encryption_key=_b64key(16))
+
+
+def test_encryption_invalid_base64_rejected() -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, cache_encryption=True, cache_encryption_key="not base64!!")
+
+
+def test_encryption_key_from_keyfile(tmp_path: Path) -> None:
+    keyfile = tmp_path / "cache.key"
+    keyfile.write_text(_b64key())
+    s = Settings(_env_file=None, cache_encryption=True, cache_encryption_keyfile=str(keyfile))
+    assert s.cache_encryption_key_bytes() == b"\x07" * 32
+
+
+def test_encryption_missing_keyfile_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None, cache_encryption=True, cache_encryption_keyfile="/no/such/key.file"
+        )
+
+
+def test_encryption_key_is_not_exposed_in_repr() -> None:
+    s = Settings(_env_file=None, cache_encryption=True, cache_encryption_key=_b64key())
+    assert "\x07" * 32 not in repr(s)  # SecretStr masks the value

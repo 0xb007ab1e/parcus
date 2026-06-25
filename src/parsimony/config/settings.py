@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
-from pydantic import field_validator, model_validator
+import base64
+import binascii
+from pathlib import Path
+
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from parsimony.quota import RateLimit
 
 __all__ = ["Settings"]
+
+_ENCRYPTION_KEY_LEN = 32  # AES-256
 
 # Values we REFUSE to bind (never public/all-interfaces — tailnet rule). The 0.0.0.0 literal
 # here is a denylist entry, not a bind target.
@@ -51,6 +57,12 @@ class Settings(BaseSettings):
     similarity_threshold: float = 0.97  # cosine; deliberately high (near-duplicate only)
     similarity_max_entries: int = 2048
     similarity_embedder: str = "hashing"  # hashing (dep-free) | local (sentence-transformers)
+
+    # At-rest cache encryption (opt-in). Key is base64(32 bytes) for AES-256, from env or a
+    # keyfile (never in code/VCS). Enabling without a valid key fails closed at startup.
+    cache_encryption: bool = False
+    cache_encryption_key: SecretStr = SecretStr("")
+    cache_encryption_keyfile: str = ""
 
     redact: bool = True
     log_level: str = "INFO"
@@ -107,6 +119,16 @@ class Settings(BaseSettings):
         return value
 
     @model_validator(mode="after")
+    def _require_valid_key_for_encryption(self) -> Settings:
+        """Reject enabling at-rest encryption without a valid 32-byte key (fail closed)."""
+        if self.cache_encryption and self.cache_encryption_key_bytes() is None:
+            raise ValueError(
+                "PARSIMONY_CACHE_ENCRYPTION=true requires a valid base64-encoded 32-byte key "
+                "(PARSIMONY_CACHE_ENCRYPTION_KEY or PARSIMONY_CACHE_ENCRYPTION_KEYFILE)"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _require_multi_tenant_for_allow_list(self) -> Settings:
         """Reject an edge allow-list without multi-tenant mode (fail fast on misconfig).
 
@@ -134,3 +156,26 @@ class Settings(BaseSettings):
         if self.rate_limit_per_minute <= 0:
             return None
         return RateLimit.per_minute(self.rate_limit_per_minute, self.rate_limit_burst)
+
+    def cache_encryption_key_bytes(self) -> bytes | None:
+        """Resolve the at-rest encryption key to 32 raw bytes, or ``None`` if unset/invalid.
+
+        Prefers the keyfile (base64 text) over the inline key; both decode base64 to exactly 32
+        bytes (AES-256). Never logs the key. Returns ``None`` on any decode/length/read failure
+        so the caller can fail closed.
+        """
+        encoded: str | None = None
+        if self.cache_encryption_keyfile:
+            try:
+                encoded = Path(self.cache_encryption_keyfile).read_text(encoding="utf-8").strip()
+            except OSError:
+                return None
+        elif self.cache_encryption_key.get_secret_value():
+            encoded = self.cache_encryption_key.get_secret_value()
+        if not encoded:
+            return None
+        try:
+            raw = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError):
+            return None
+        return raw if len(raw) == _ENCRYPTION_KEY_LEN else None
