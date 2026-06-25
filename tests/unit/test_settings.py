@@ -17,6 +17,7 @@ def test_secure_defaults() -> None:
     assert s.cache is True
     assert s.lossless is True
     assert s.filler is False  # lossy passes off by default
+    assert s.filler_aggressive is False  # conservative set by default
     assert s.redact is True
     assert s.tailnet_ip is None
 

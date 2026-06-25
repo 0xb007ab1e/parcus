@@ -14,12 +14,13 @@ error it returns the request unchanged.
 """
 
 from parsimony.compress.chain import ChainCompressor
-from parsimony.compress.filler import DEFAULT_FILLERS, FillerCompressor
+from parsimony.compress.filler import AGGRESSIVE_FILLERS, DEFAULT_FILLERS, FillerCompressor
 from parsimony.compress.learned import LearnedCompressor, LLMLinguaReducer, TokenReducer
 from parsimony.compress.lossless import LosslessCompressor
 from parsimony.compress.null import NullCompressor
 
 __all__ = [
+    "AGGRESSIVE_FILLERS",
     "DEFAULT_FILLERS",
     "ChainCompressor",
     "FillerCompressor",

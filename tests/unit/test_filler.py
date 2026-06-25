@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from parsimony.compress.filler import DEFAULT_FILLERS, FillerCompressor, strip_fillers
+from parsimony.compress.filler import (
+    AGGRESSIVE_FILLERS,
+    DEFAULT_FILLERS,
+    FillerCompressor,
+    strip_fillers,
+)
+from parsimony.eval import is_filler_equivalent
 from parsimony.model import CanonicalRequest, Dialect, Message, Role, Span
 
 
@@ -67,3 +73,28 @@ class TestFillerCompressor:
         out, stats = FillerCompressor(tokenizer=_Boom()).compress(req)
         assert out is req
         assert stats == ()
+
+
+class TestAggressiveFillers:
+    def test_is_a_superset_of_default(self) -> None:
+        assert DEFAULT_FILLERS <= AGGRESSIVE_FILLERS
+        assert len(AGGRESSIVE_FILLERS) > len(DEFAULT_FILLERS)
+
+    def test_removes_more_than_default(self) -> None:
+        text = "this is obviously and clearly just a test"
+        default_out = strip_fillers(text, DEFAULT_FILLERS)
+        aggressive_out = strip_fillers(text, AGGRESSIVE_FILLERS)
+        assert "obviously" in default_out and "clearly" in default_out  # not in the small set
+        assert "obviously" not in aggressive_out and "clearly" not in aggressive_out
+        assert "just" not in aggressive_out  # shared with default
+
+    def test_aggressive_removal_still_passes_model_free_guardrail(self) -> None:
+        # The structural invariant holds for ANY allow-list: only listed whole tokens are removed.
+        req = CanonicalRequest(
+            dialect=Dialect.ANTHROPIC,
+            model="m",
+            messages=(Message(role=Role.USER, spans=(Span("obviously fix this clearly now"),)),),
+        )
+        out, _stats = FillerCompressor(fillers=AGGRESSIVE_FILLERS).compress(req)
+        assert is_filler_equivalent(req, out, AGGRESSIVE_FILLERS)
+        assert out.messages[0].text == "fix this now"

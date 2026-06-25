@@ -52,6 +52,7 @@ class Settings(BaseSettings):
 
     lossless: bool = True
     filler: bool = False
+    filler_aggressive: bool = False  # use the larger AGGRESSIVE_FILLERS set (validate offline)
     learned: bool = False  # Tier-2 local learned compressor (opt-in; needs the 'learned' extra)
     learned_ratio: float = 0.5  # target fraction of prose tokens to keep
 

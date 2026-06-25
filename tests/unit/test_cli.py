@@ -47,6 +47,32 @@ def test_eval_filler_command_runs_builtin_corpus(capsys: pytest.CaptureFixture[s
     assert "TOTAL" in capsys.readouterr().out
 
 
+def test_eval_aggressive_filler_runs_and_passes_guardrail(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # The model-free guardrail holds for the larger set too, so the gate still passes.
+    rc = cli.main(["eval", "--filler", "--aggressive"])
+    assert rc == 0
+    assert "TOTAL" in capsys.readouterr().out
+
+
+def test_build_engine_uses_aggressive_fillers_when_configured() -> None:
+    from parsimony.compress import AGGRESSIVE_FILLERS, FillerCompressor
+
+    engine = cli.build_engine(
+        Settings(
+            _env_file=None,
+            cache=False,
+            metrics=False,
+            lossless=False,
+            filler=True,
+            filler_aggressive=True,
+        )
+    )
+    assert isinstance(engine._compressor, FillerCompressor)
+    assert engine._compressor._fillers == AGGRESSIVE_FILLERS
+
+
 def test_eval_retrieval_gate_runs(capsys: pytest.CaptureFixture[str]) -> None:
     rc = cli.main(["eval", "--retrieval"])
     assert rc == 0  # built-in retrieval samples pass the recall gate

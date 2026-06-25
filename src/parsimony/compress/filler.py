@@ -22,7 +22,7 @@ from parsimony.ports import TokenizerPort
 from parsimony.spans import classify_spans
 from parsimony.tokenize import default_tokenizer
 
-__all__ = ["DEFAULT_FILLERS", "FillerCompressor", "strip_fillers"]
+__all__ = ["AGGRESSIVE_FILLERS", "DEFAULT_FILLERS", "FillerCompressor", "strip_fillers"]
 
 _STEP_NAME = "filler"
 _PUNCTUATION = string.punctuation
@@ -43,6 +43,38 @@ DEFAULT_FILLERS: frozenset[str] = frozenset(
         "honestly",
         "just",
         "quite",
+    }
+)
+
+# Larger, opt-in set (superset of DEFAULT) adding more discourse hedges/intensifiers/fillers.
+# Removal stays **structurally** safe — the model-free guardrail (``is_filler_equivalent``) still
+# proves only allow-listed whole tokens were dropped, for any set. The added words carry more
+# **semantic** risk than the conservative default, so validate this set with the offline quality
+# judge (``parsimony eval --filler --aggressive``; LLMJudge) before enabling it in production.
+AGGRESSIVE_FILLERS: frozenset[str] = DEFAULT_FILLERS | frozenset(
+    {
+        "obviously",
+        "clearly",
+        "certainly",
+        "definitely",
+        "absolutely",
+        "totally",
+        "completely",
+        "particularly",
+        "specifically",
+        "generally",
+        "typically",
+        "perhaps",
+        "maybe",
+        "somewhat",
+        "rather",
+        "fairly",
+        "pretty",
+        "truly",
+        "indeed",
+        "surely",
+        "arguably",
+        "presumably",
     }
 )
 

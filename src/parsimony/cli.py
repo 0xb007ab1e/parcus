@@ -19,6 +19,7 @@ from fastapi import FastAPI
 from parsimony import __version__
 from parsimony.cache import CachePolicy, NullCache, SimilarityCache, SqliteCache
 from parsimony.compress import (
+    AGGRESSIVE_FILLERS,
     DEFAULT_FILLERS,
     ChainCompressor,
     FillerCompressor,
@@ -86,7 +87,8 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
     if settings.lossless:
         passes.append(LosslessCompressor(verify_sample=rate))
     if settings.filler:
-        passes.append(FillerCompressor(verify_sample=rate))
+        fillers = AGGRESSIVE_FILLERS if settings.filler_aggressive else DEFAULT_FILLERS
+        passes.append(FillerCompressor(fillers=fillers, verify_sample=rate))
     if settings.learned:
         # Local LLMLingua reducer; model loads lazily on first use (the 'learned' extra). Last
         # in the chain — operate on already-losslessly/filler-trimmed prose.
@@ -212,6 +214,11 @@ def _parser() -> argparse.ArgumentParser:
         help="Evaluate the Tier-1 filler pass (lossless+filler) with the filler guardrail.",
     )
     ev.add_argument(
+        "--aggressive",
+        action="store_true",
+        help="With --filler, use the larger AGGRESSIVE_FILLERS set instead of the default.",
+    )
+    ev.add_argument(
         "--retrieval",
         action="store_true",
         help="Run the memory retrieval-quality gate (recall) instead of compression eval.",
@@ -285,10 +292,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if sim_report.passed else 1
         samples = load_jsonl(args.dataset) if args.dataset else BUILTIN_SAMPLES
         if args.filler:
+            fillers = AGGRESSIVE_FILLERS if args.aggressive else DEFAULT_FILLERS
             report = evaluate(
                 samples,
-                compressor=ChainCompressor([LosslessCompressor(), FillerCompressor()]),
-                equivalence=lambda o, c: is_filler_equivalent(o, c, DEFAULT_FILLERS),
+                compressor=ChainCompressor(
+                    [LosslessCompressor(), FillerCompressor(fillers=fillers)]
+                ),
+                equivalence=lambda o, c: is_filler_equivalent(o, c, fillers),
             )
         else:
             report = evaluate(samples)
