@@ -10,12 +10,34 @@ readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
 authors = [{ name = "0xb007ab1e", email = "134006168+0xb007ab1e@users.noreply.github.com" }]
-keywords = ["llm", "proxy", "tokens", "compression", "cache", "agentic"]
+keywords = [
+  "llm",
+  "proxy",
+  "tokens",
+  "token-optimization",
+  "prompt-compression",
+  "cache",
+  "agentic",
+  "agents",
+  "anthropic",
+  "openai",
+  "claude",
+  "llmlingua",
+  "parsimony",
+]
 classifiers = [
-  "Programming Language :: Python :: 3.12",
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
-  "Topic :: Software Development :: Libraries",
-  "Private :: Do Not Upload",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Internet :: Proxy Servers",
+  "Environment :: Console",
+  "Environment :: Web Environment",
+  "Typing :: Typed",
 ]
 dependencies = [
   "fastapi>=0.115",
@@ -45,6 +67,13 @@ dev = [
   "pdoc>=14.5",            # doc generation (mandate §1)
   "cryptography>=42",      # exercise the at-rest encryption path in tests/CI
 ]
+
+[project.urls]
+Homepage = "https://github.com/0xb007ab1e/parcus"
+Documentation = "https://github.com/0xb007ab1e/parcus/blob/main/docs/guide.md"
+Repository = "https://github.com/0xb007ab1e/parcus"
+Changelog = "https://github.com/0xb007ab1e/parcus/blob/main/CHANGELOG.md"
+Issues = "https://github.com/0xb007ab1e/parcus/issues"
 
 [project.scripts]
 parcus = "parcus.cli:main"
