@@ -1,0 +1,15 @@
+# gitleaks configuration — secret-scan gate (workflow-cicd, master §1).
+# Extends the built-in rules; allowlists only intentional, fake test fixtures.
+title = "parsimony gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Intentional non-secrets: redactor test fixtures verify DETECTION of these shapes."
+# These files contain deliberately fake credential-shaped strings (e.g. a placeholder Slack
+# token, a bare PEM header with no key material) used to test that the redactor flags them.
+# They are not real secrets. Everything else is scanned normally.
+paths = [
+  '''tests/unit/test_redactor\.py''',
+]
