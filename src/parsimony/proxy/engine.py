@@ -18,6 +18,7 @@ from typing import Any
 from parsimony.cache.key import compute_key
 from parsimony.cache.policy import CachePolicy
 from parsimony.memory.compaction import compact_by_summary, compact_with_memory
+from parsimony.memory.provider import MemoryProvider, SharedMemoryProvider
 from parsimony.memory.summary import ExtractiveSummarizer, Summarizer
 from parsimony.model import CachedResponse, CanonicalRequest, CompressionStats, Dialect, Role
 from parsimony.obs import MetricsSink, NullSink, SavingsEvent, StageStat
@@ -94,10 +95,15 @@ class ProxyEngine:
         config: EngineConfig,
         metrics: MetricsSink | None = None,
         memory: MemoryPort | None = None,
+        memory_provider: MemoryProvider | None = None,
         tokenizer: TokenizerPort | None = None,
         summarizer: Summarizer | None = None,
     ) -> None:
-        """Inject the upstream adapter, optimization components, config, metrics, and memory."""
+        """Inject the upstream adapter, optimization components, config, metrics, and memory.
+
+        ``memory_provider`` resolves the per-tenant memory; if omitted, ``memory`` is wrapped in a
+        :class:`SharedMemoryProvider` (one graph for all tenants — single-tenant behaviour).
+        """
         self._upstream = upstream
         self._compressor = compressor
         self._cache = cache
@@ -105,7 +111,7 @@ class ProxyEngine:
         self._policy = policy
         self._config = config
         self._metrics = metrics or NullSink()
-        self._memory = memory
+        self._memory_provider = memory_provider or SharedMemoryProvider(memory)
         self._tokenizer = tokenizer or default_tokenizer()
         self._summarizer = summarizer or ExtractiveSummarizer()
 
@@ -177,7 +183,7 @@ class ProxyEngine:
 
         canonical = self._canonicalize(dialect, body)
         if canonical is not None:
-            working, memory_action = self._apply_memory(canonical)
+            working, memory_action = self._apply_memory(canonical, tenant)
             out_body, compressed, comp_stats = self._compress_request(working, body)
             before = self._tokenizer.count(canonical.text, canonical.model)
             meta["tokens_before"] = before
@@ -223,16 +229,22 @@ class ProxyEngine:
             return None
         return parse(dialect, decoded)
 
-    def _apply_memory(self, canonical: CanonicalRequest) -> tuple[CanonicalRequest, str]:
-        """Ingest into memory and optionally compact the request (fail open).
+    def _apply_memory(
+        self, canonical: CanonicalRequest, tenant: str
+    ) -> tuple[CanonicalRequest, str]:
+        """Ingest into the tenant's memory and optionally compact the request (fail open).
 
-        Returns the (possibly compacted) request and an action label (``off``/``ingest``/
-        ``compact``) for observability.
+        The memory is resolved per tenant, so one tenant's context can never be ingested into or
+        retrieved from another's graph. Returns the (possibly compacted) request and an action
+        label (``off``/``ingest``/``compact``/``summary``) for observability.
         """
-        if self._memory is None or not self._config.memory_enabled:
+        if not self._config.memory_enabled:
+            return canonical, "off"
+        memory = self._memory_provider.for_tenant(tenant)
+        if memory is None:
             return canonical, "off"
         try:
-            self._memory.ingest(canonical)
+            memory.ingest(canonical)
         except Exception:
             return canonical, "off"
         if self._config.memory_summarize:
@@ -252,7 +264,7 @@ class ProxyEngine:
         try:
             compacted = compact_with_memory(
                 canonical,
-                self._memory,
+                memory,
                 keep_recent=self._config.memory_keep_recent,
                 retrieve=self._config.memory_retrieve,
                 min_messages=self._config.memory_min_messages,

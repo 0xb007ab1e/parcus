@@ -38,7 +38,10 @@ from parsimony.memory import (
     EmbedderPort,
     GraphMemory,
     HashingEmbedder,
+    MemoryProvider,
+    PerTenantMemoryProvider,
     SentenceTransformerEmbedder,
+    SharedMemoryProvider,
 )
 from parsimony.obs import (
     LoggingSink,
@@ -99,7 +102,7 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
         ttl_seconds=settings.cache_ttl_seconds,
     )
     metrics_sink = metrics if metrics is not None else _build_metrics(settings)[0]
-    memory = GraphMemory() if settings.memory else None
+    memory_provider = _build_memory_provider(settings)
     return ProxyEngine(
         upstream=HttpxUpstream(),
         compressor=compressor,
@@ -123,8 +126,18 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
             allowed_tenants=settings.allowed_tenant_set(),
         ),
         metrics=metrics_sink,
-        memory=memory,
+        memory_provider=memory_provider,
     )
+
+
+def _build_memory_provider(settings: Settings) -> MemoryProvider | None:
+    """Build the memory provider: per-tenant graphs in hosted mode, one shared graph locally."""
+    if not settings.memory:
+        return None
+    if settings.multi_tenant:
+        # A fresh graph per tenant id so context never crosses tenants (isolation boundary).
+        return PerTenantMemoryProvider(lambda: GraphMemory())
+    return SharedMemoryProvider(GraphMemory())
 
 
 def build_app(settings: Settings | None = None) -> FastAPI:

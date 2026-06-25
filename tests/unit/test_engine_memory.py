@@ -111,8 +111,56 @@ class TestMemoryWiring:
 class TestCliMemoryWiring:
     def test_build_engine_wires_memory_when_enabled(self) -> None:
         eng = cli.build_engine(Settings(_env_file=None, cache=False, metrics=False, memory=True))
-        assert eng._memory is not None
+        assert eng._memory_provider.for_tenant("") is not None
 
     def test_build_engine_has_no_memory_by_default(self) -> None:
         eng = cli.build_engine(Settings(_env_file=None, cache=False, metrics=False))
-        assert eng._memory is None
+        assert eng._memory_provider.for_tenant("") is None
+
+    def test_build_engine_uses_per_tenant_provider_in_multi_tenant_mode(self) -> None:
+        from parsimony.memory import PerTenantMemoryProvider
+
+        eng = cli.build_engine(
+            Settings(_env_file=None, cache=False, metrics=False, memory=True, multi_tenant=True)
+        )
+        assert isinstance(eng._memory_provider, PerTenantMemoryProvider)
+        # Distinct tenants get distinct, isolated graphs.
+        assert eng._memory_provider.for_tenant("a") is not eng._memory_provider.for_tenant("b")
+
+
+class TestPerTenantMemoryRouting:
+    """In multi-tenant mode the engine ingests into the requesting tenant's own graph."""
+
+    async def test_ingest_routed_to_separate_tenant_memories(self) -> None:
+        from parsimony.memory import PerTenantMemoryProvider
+
+        built: list[FakeMemory] = []
+
+        def factory() -> FakeMemory:
+            mem = FakeMemory()
+            built.append(mem)
+            return mem
+
+        eng = ProxyEngine(
+            upstream=FakeUpstream(),
+            compressor=LosslessCompressor(),
+            cache=NullCache(),
+            redactor=Redactor(),
+            policy=CachePolicy(),
+            config=EngineConfig(
+                anthropic_upstream="https://a.test",
+                openai_upstream="https://o.test",
+                cache_enabled=False,
+                memory_enabled=True,
+                multi_tenant=True,
+            ),
+            memory_provider=PerTenantMemoryProvider(factory),  # type: ignore[arg-type]
+        )
+        body = _long_anthropic()
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "tenant-a")], body)
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "tenant-b")], body)
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "tenant-a")], body)
+        assert len(built) == 2  # one graph per distinct tenant, reused for the repeat
+        # Each tenant's graph only saw its own requests.
+        assert len(built[0].ingested) == 2  # tenant-a's two requests
+        assert len(built[1].ingested) == 1  # tenant-b's single request

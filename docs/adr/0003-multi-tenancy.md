@@ -53,22 +53,36 @@ the proxy without rotating the provider key — defence in depth, not a replacem
 
 ## Scope / what's still deferred
 
-Delivered: **cache scoping** (slice 1) + **edge authorization** (slice 2). Remaining hosted-mode
-slices, deferred to keep changes small and reviewable:
+Delivered: **cache scoping** (slice 1), **edge authorization** (slice 2), and **per-tenant memory
+isolation** (slice 3 — below). Remaining hosted-mode slices, deferred to keep changes small:
 
-- **Per-tenant memory + metrics isolation** — the graph memory and metrics store are currently
-  shared; before hosted memory/injection is enabled they must be tenant-scoped (a shared graph
-  would leak across tenants exactly like the cache would have). Memory injection stays off by
-  default until then.
+- **Per-tenant metrics tagging** — metrics are content-free counts (no cross-tenant *leak*), so
+  this is tenant attribution for billing/support, not an isolation boundary; lower priority.
 - **Per-tenant quotas / rate limits** — bound cost and prevent noisy-neighbour abuse
   (`topic-multi-tenancy`, `std-owasp-api` API4).
 
+## Per-tenant memory isolation (slice 3 — delivered)
+
+The graph memory holds prior prompt content for injection/compaction. A *shared* graph in hosted
+mode would let one tenant's context be retrieved into another's request — the memory analogue of
+E1. A `MemoryProvider` seam resolves the right graph for a tenant **before** any ingest/retrieve:
+
+- `parsimony.memory.SharedMemoryProvider` — one graph for all (single-tenant; today's behaviour).
+- `parsimony.memory.PerTenantMemoryProvider` — a fresh graph per tenant id, built lazily and
+  cached; ingest/retrieval for one tenant can never surface another's content.
+- The engine holds a `MemoryProvider` (wrapping the single memory via `SharedMemoryProvider` when
+  none is injected) and calls `for_tenant(tenant)` per request; the composition root builds a
+  `PerTenantMemoryProvider` when `multi_tenant` is on. `memory.provider` is in the critical gate;
+  a negative test proves tenant B cannot retrieve tenant A's ingested content.
+
+This makes hosted memory injection **safe to enable** — though it remains off by default until an
+operator opts in.
+
 ## Consequences
 
-- Hosted operators get cache isolation + an edge allow-list with one-flag opt-ins and no change
-  to local users.
+- Hosted operators get cache isolation, an edge allow-list, and isolated per-tenant memory with
+  one-flag opt-ins, and no change to local single-tenant users.
 - The digest is opaque and not exposed in any response header, so enabling multi-tenant mode
   does not leak which tenant served a request.
-- Until the remaining slices land, hosted mode should run with memory **off** (the default) and
-  rely on the edge allow-list + the proxy's network controls + the provider's own auth for
-  access control.
+- Metrics remain a shared, content-free aggregate (no leak); per-tenant attribution and quotas
+  are the remaining hosted-mode work.

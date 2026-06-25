@@ -16,6 +16,11 @@ from parsimony.memory.embedding import (
 from parsimony.memory.graph import GraphMemory
 from parsimony.memory.ingest import ingest_request
 from parsimony.memory.model import MemoryEdge, MemoryKind, MemoryNode, node_id
+from parsimony.memory.provider import (
+    MemoryProvider,
+    PerTenantMemoryProvider,
+    SharedMemoryProvider,
+)
 from parsimony.memory.retrieval import jaccard, relevant
 from parsimony.memory.sqlite_store import SqliteGraphStore
 from parsimony.memory.store import GraphStore, InMemoryGraphStore
@@ -33,7 +38,10 @@ __all__ = [
     "MemoryEdge",
     "MemoryKind",
     "MemoryNode",
+    "MemoryProvider",
+    "PerTenantMemoryProvider",
     "SentenceTransformerEmbedder",
+    "SharedMemoryProvider",
     "SqliteGraphStore",
     "Summarizer",
     "compact_by_summary",
