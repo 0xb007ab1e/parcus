@@ -65,6 +65,8 @@ class AggregateSink:
         self._tokens_after = 0
         # Per-stage running totals: name -> {before, after, checked, ok}.
         self._stages: dict[str, dict[str, int]] = {}
+        # Per-tenant running totals (credentialed tenants only): id -> {requests, before, after}.
+        self._tenants: dict[str, dict[str, int]] = {}
 
     def record(self, event: SavingsEvent) -> None:
         """Fold the event (and its per-stage breakdown) into the running totals."""
@@ -83,6 +85,13 @@ class AggregateSink:
                 if stage.ok is not None:
                     acc["checked"] += 1
                     acc["ok"] += 1 if stage.ok else 0
+            if event.tenant:
+                tacc = self._tenants.setdefault(
+                    event.tenant, {"requests": 0, "before": 0, "after": 0}
+                )
+                tacc["requests"] += 1
+                tacc["before"] += event.tokens_before
+                tacc["after"] += event.tokens_after
 
     def snapshot(self) -> dict[str, Any]:
         """Return a point-in-time copy of the aggregate metrics."""
@@ -99,7 +108,20 @@ class AggregateSink:
                 "tokens_saved": saved,
                 "overall_ratio": round(ratio, 4),
                 "stages": {name: self._stage_summary(acc) for name, acc in self._stages.items()},
+                "by_tenant": {t: self._tenant_summary(acc) for t, acc in self._tenants.items()},
             }
+
+    @staticmethod
+    def _tenant_summary(acc: dict[str, int]) -> dict[str, Any]:
+        """Summarise one tenant's running totals (requests + token reduction)."""
+        saved = acc["before"] - acc["after"]
+        return {
+            "requests": acc["requests"],
+            "tokens_before": acc["before"],
+            "tokens_after": acc["after"],
+            "tokens_saved": saved,
+            "reduction": round(saved / acc["before"], 4) if acc["before"] else 0.0,
+        }
 
     @staticmethod
     def _stage_summary(acc: dict[str, int]) -> dict[str, Any]:

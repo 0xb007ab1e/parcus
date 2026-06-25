@@ -151,6 +151,7 @@ class ProxyEngine:
                 status_code=result.status_code,
                 duration_ms=(time.monotonic() - start) * 1000.0,
                 stages=tuple(meta.get("stages", ())),
+                tenant=str(meta.get("tenant", "")),
             )
         )
         return result
@@ -177,6 +178,8 @@ class ProxyEngine:
         # also derived when an edge allow-list is configured, so authorization can be enforced.
         scoped = self._config.multi_tenant or bool(self._config.allowed_tenants)
         tenant = derive_tenant(headers, salt=self._config.salt) if scoped else ""
+        if tenant:
+            meta["tenant"] = tenant  # content-free attribution; not exposed as a response header
         if not is_authorized(tenant, self._config.allowed_tenants):
             # Fail closed: an unlisted/anonymous tenant never reaches an upstream.
             return ProxyResult(

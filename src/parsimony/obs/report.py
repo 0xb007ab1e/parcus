@@ -37,4 +37,9 @@ def render_stats(snapshot: dict[str, Any]) -> str:
         for kind, result in sorted(snapshot["evals"].items()):
             verdict = "PASS" if result["passed"] else "FAIL"
             lines.append(f"  {kind:<20} score={result['score'] * 100:.1f}%  {verdict}")
+    if snapshot.get("by_tenant"):
+        lines.append("")
+        lines.append(f"per-tenant attribution:  {'tenant':<18} {'reqs':>6} {'reduction':>10}")
+        for tenant, t in sorted(snapshot["by_tenant"].items()):
+            lines.append(f"{'':<25}{tenant:<18} {t['requests']:>6} {t['reduction'] * 100:>9.1f}%")
     return "\n".join(lines)

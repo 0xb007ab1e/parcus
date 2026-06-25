@@ -17,6 +17,7 @@ def _event(
     tokens_after: int = 60,
     canonicalized: bool = True,
     status_code: int = 200,
+    tenant: str = "",
 ) -> SavingsEvent:
     return SavingsEvent(
         request_id="req-1",
@@ -27,6 +28,7 @@ def _event(
         tokens_after=tokens_after,
         status_code=status_code,
         duration_ms=1.5,
+        tenant=tenant,
     )
 
 
@@ -63,6 +65,7 @@ class TestSavingsEvent:
             "ratio",
             "status_code",
             "duration_ms",
+            "tenant",
             "stages",
         }
 
@@ -94,6 +97,19 @@ class TestSinks:
         assert snap["requests"] == 0
         assert snap["overall_ratio"] == 0.0
         assert snap["cache_hit_rate"] == 0.0
+        assert snap["by_tenant"] == {}
+
+    def test_aggregate_by_tenant_attribution(self) -> None:
+        agg = AggregateSink()
+        agg.record(_event(tenant="t1", tokens_before=100, tokens_after=60))
+        agg.record(_event(tenant="t1", tokens_before=100, tokens_after=80))
+        agg.record(_event(tenant="t2", tokens_before=50, tokens_after=50))
+        agg.record(_event(tenant=""))  # single-tenant noise is excluded
+        by_tenant = agg.snapshot()["by_tenant"]
+        assert set(by_tenant) == {"t1", "t2"}
+        assert by_tenant["t1"]["requests"] == 2
+        assert by_tenant["t1"]["tokens_saved"] == 60
+        assert by_tenant["t2"]["reduction"] == 0.0
 
     def test_multi_sink_fans_out(self) -> None:
         a, b = _SpySink(), _SpySink()

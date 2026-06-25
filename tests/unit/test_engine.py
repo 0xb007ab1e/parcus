@@ -192,6 +192,20 @@ class TestMetrics:
         assert spy.events[0].status_code == 502
         assert spy.events[0].request_id  # a non-empty generated id
 
+    async def test_event_carries_tenant_in_multi_tenant_mode(self) -> None:
+        from parsimony.tenant import derive_tenant
+
+        spy = SpySink()
+        eng = _engine(FakeUpstream(), cache_enabled=False, multi_tenant=True, metrics=spy)
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], _anthropic("hi"))
+        assert spy.events[0].tenant == derive_tenant([("x-api-key", "k")])
+
+    async def test_event_has_empty_tenant_in_single_tenant_mode(self) -> None:
+        spy = SpySink()
+        eng = _engine(FakeUpstream(), cache_enabled=False, metrics=spy)
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], _anthropic("hi"))
+        assert spy.events[0].tenant == ""
+
 
 class TestMultiTenantIsolation:
     """Hosted mode: the cache is namespaced per credential-derived tenant (BOLA defence)."""

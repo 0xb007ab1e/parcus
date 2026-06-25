@@ -66,6 +66,8 @@ class SavingsEvent:
         status_code: HTTP status returned to the client.
         duration_ms: Proxy-side handling time in milliseconds.
         stages: Per-stage reduction + accuracy breakdown (memory, lossless, filler, …).
+        tenant: Opaque, content-free tenant id for per-tenant attribution (empty in
+            single-tenant mode). Never the raw credential — see :mod:`parsimony.tenant`.
     """
 
     request_id: str
@@ -77,6 +79,7 @@ class SavingsEvent:
     status_code: int
     duration_ms: float
     stages: tuple[StageStat, ...] = field(default_factory=tuple)
+    tenant: str = ""
 
     @property
     def tokens_saved(self) -> int:
@@ -104,5 +107,6 @@ class SavingsEvent:
             "ratio": round(self.ratio, 4),
             "status_code": self.status_code,
             "duration_ms": round(self.duration_ms, 2),
+            "tenant": self.tenant,
             "stages": [s.to_dict() for s in self.stages],
         }

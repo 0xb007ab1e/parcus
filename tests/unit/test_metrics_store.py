@@ -9,7 +9,7 @@ from pathlib import Path
 from parsimony.obs import SavingsEvent, SqliteMetricsSink, StageStat, render_stats
 
 
-def _event(stages: tuple[StageStat, ...], *, cache: str = "miss") -> SavingsEvent:
+def _event(stages: tuple[StageStat, ...], *, cache: str = "miss", tenant: str = "") -> SavingsEvent:
     return SavingsEvent(
         request_id="r",
         dialect="anthropic",
@@ -20,6 +20,7 @@ def _event(stages: tuple[StageStat, ...], *, cache: str = "miss") -> SavingsEven
         status_code=200,
         duration_ms=1.0,
         stages=stages,
+        tenant=tenant,
     )
 
 
@@ -49,6 +50,18 @@ class TestSqliteMetricsSink:
         assert snap["overall_ratio"] == 0.0
         assert snap["stages"] == {}
         assert snap["evals"] == {}
+        assert snap["by_tenant"] == {}
+
+    def test_by_tenant_attribution(self) -> None:
+        sink = SqliteMetricsSink()
+        sink.record(_event((), tenant="t1"))
+        sink.record(_event((), tenant="t1"))
+        sink.record(_event((), tenant="t2"))
+        sink.record(_event(()))  # tenant '' excluded from per-tenant rollup
+        by_tenant = sink.snapshot()["by_tenant"]
+        assert set(by_tenant) == {"t1", "t2"}
+        assert by_tenant["t1"]["requests"] == 2
+        assert by_tenant["t1"]["tokens_saved"] == 4  # 2 requests * (10-8)
 
     def test_persists_across_instances(self, tmp_path: Path) -> None:
         path = str(tmp_path / "m.sqlite")
@@ -71,6 +84,26 @@ class TestSqliteMetricsSink:
         sink.record(_event((StageStat("lossless", 10, 8, True),)))  # no raise
         sink.record_eval("x", 1.0, True)  # no raise
 
+    def test_migrates_legacy_db_without_tenant_column(self, tmp_path: Path) -> None:
+        import sqlite3
+
+        path = str(tmp_path / "legacy.sqlite")
+        # A pre-tenant events table (no tenant column).
+        legacy = sqlite3.connect(path)
+        legacy.execute(
+            "CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, dialect TEXT NOT NULL, "
+            "cache TEXT NOT NULL, tokens_before INTEGER NOT NULL, tokens_after INTEGER NOT NULL, "
+            "status_code INTEGER NOT NULL, created_at REAL NOT NULL)"
+        )
+        legacy.commit()
+        legacy.close()
+        sink = SqliteMetricsSink(path)  # should add the tenant column on open
+        sink.record(_event((), tenant="t1"))  # and accept tenant-tagged writes
+        snap = sink.snapshot()
+        assert snap["requests"] == 1
+        assert snap["by_tenant"]["t1"]["requests"] == 1
+        sink.close()
+
 
 class TestRenderStats:
     def test_renders_totals_stages_and_evals(self) -> None:
@@ -82,3 +115,15 @@ class TestRenderStats:
         assert "lossless" in out
         assert "eval gates" in out
         assert "retrieval" in out
+
+    def test_renders_per_tenant_section_when_present(self) -> None:
+        sink = SqliteMetricsSink()
+        sink.record(_event((StageStat("lossless", 10, 8, True),), tenant="acme01"))
+        out = render_stats(sink.snapshot())
+        assert "per-tenant attribution" in out
+        assert "acme01" in out
+
+    def test_omits_per_tenant_section_when_single_tenant(self) -> None:
+        sink = SqliteMetricsSink()
+        sink.record(_event((StageStat("lossless", 10, 8, True),)))  # tenant ''
+        assert "per-tenant attribution" not in render_stats(sink.snapshot())

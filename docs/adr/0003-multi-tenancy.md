@@ -51,13 +51,11 @@ optional **fail-closed allow-list** of permitted tenant ids:
 This authorizes *which principals may use this instance* and lets an operator revoke a tenant at
 the proxy without rotating the provider key — defence in depth, not a replacement for provider auth.
 
-## Scope / what's still deferred
+## Scope — all slices delivered
 
-Delivered: **cache scoping** (slice 1), **edge authorization** (slice 2), **per-tenant memory
-isolation** (slice 3 — below), and **per-tenant rate limiting** (slice 4 — below). Remaining:
-
-- **Per-tenant metrics tagging** — metrics are content-free counts (no cross-tenant *leak*), so
-  this is tenant attribution for billing/support, not an isolation boundary; lower priority.
+Hosted mode is delivered across five slices: **cache scoping** (1), **edge authorization** (2),
+**per-tenant memory isolation** (3), **per-tenant rate limiting** (4), and **per-tenant metrics
+tagging** (5 — below). The first four are isolation/abuse controls; the fifth is attribution.
 
 ## Per-tenant memory isolation (slice 3 — delivered)
 
@@ -92,11 +90,23 @@ consumption; noisy-neighbour), each tenant gets an independent **token bucket**:
 This control **fails closed** against abuse (shed the request), distinct from the optimization
 path, which fails open.
 
+## Per-tenant metrics tagging (slice 5 — delivered)
+
+For billing/support attribution, each savings event carries the **opaque, content-free** tenant
+id (`SavingsEvent.tenant`; never the raw credential). The persistent store and the in-memory
+aggregate both expose a `by_tenant` rollup (requests + token reduction per tenant) — populated
+only for credentialed tenants (the single-tenant ``""`` bucket is excluded), surfaced by
+`parsimony stats` and the JSON endpoint. The tenant id is **not** emitted as a response header,
+so attribution doesn't reveal which tenant served a request. This is attribution, not an
+isolation boundary — metrics were already content-free counts. (Prometheus output stays global:
+per-tenant labels are deliberately omitted to avoid metric-cardinality blow-up.)
+
 ## Consequences
 
-- Hosted operators get cache isolation, an edge allow-list, isolated per-tenant memory, and
-  per-tenant rate limiting with one-flag opt-ins, and no change to local single-tenant users.
-- The digest is opaque and not exposed in any response header, so enabling multi-tenant mode
+- Hosted operators get cache isolation, an edge allow-list, isolated per-tenant memory,
+  per-tenant rate limiting, and per-tenant attribution — all one-flag opt-ins, with no change to
+  local single-tenant users.
+- The tenant id is opaque and never exposed as a response header, so enabling multi-tenant mode
   does not leak which tenant served a request.
-- Metrics remain a shared, content-free aggregate (no leak); per-tenant metrics *attribution*
-  (tagging) is the remaining hosted-mode work.
+- Hosted mode is feature-complete for this ADR; future hardening (e.g. per-tenant encryption
+  keys / crypto-shredding) can build on the same server-side tenant identity.

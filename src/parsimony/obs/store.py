@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS events (
     tokens_before INTEGER NOT NULL,
     tokens_after  INTEGER NOT NULL,
     status_code   INTEGER NOT NULL,
-    created_at    REAL NOT NULL
+    created_at    REAL NOT NULL,
+    tenant        TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS stage_events (
     stage         TEXT NOT NULL,
@@ -63,6 +64,13 @@ class SqliteMetricsSink:
                 pass
         with self._conn:
             self._conn.executescript(_SCHEMA)
+            self._migrate()
+
+    def _migrate(self) -> None:
+        """Add the tenant column to a pre-existing events table (idempotent expand migration)."""
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(events)")}
+        if "tenant" not in columns:
+            self._conn.execute("ALTER TABLE events ADD COLUMN tenant TEXT NOT NULL DEFAULT ''")
 
     def record(self, event: SavingsEvent) -> None:
         """Persist a request's totals + per-stage breakdown (best-effort; never raises)."""
@@ -70,8 +78,8 @@ class SqliteMetricsSink:
             with self._lock, self._conn:
                 cursor = self._conn.execute(
                     "INSERT INTO events "
-                    "(dialect, cache, tokens_before, tokens_after, status_code, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    "(dialect, cache, tokens_before, tokens_after, status_code, created_at, "
+                    "tenant) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
                         event.dialect,
                         event.cache,
@@ -79,6 +87,7 @@ class SqliteMetricsSink:
                         event.tokens_after,
                         event.status_code,
                         time.time(),
+                        event.tenant,
                     ),
                 )
                 _ = cursor.lastrowid
@@ -119,6 +128,11 @@ class SqliteMetricsSink:
                 "SELECT kind, score, passed FROM eval_runs e "
                 "WHERE id = (SELECT MAX(id) FROM eval_runs WHERE kind = e.kind)"
             ).fetchall()
+            # Per-tenant attribution (only credentialed tenants; '' = single-tenant noise).
+            tenant_rows = self._conn.execute(
+                "SELECT tenant, COUNT(*), COALESCE(SUM(tokens_before), 0), "
+                "COALESCE(SUM(tokens_after), 0) FROM events WHERE tenant != '' GROUP BY tenant"
+            ).fetchall()
 
         saved = before - after
         return {
@@ -137,6 +151,9 @@ class SqliteMetricsSink:
                 kind: {"score": round(score, 4), "passed": bool(passed)}
                 for kind, score, passed in eval_rows
             },
+            "by_tenant": {
+                tenant: _tenant_summary(reqs, tb, ta) for tenant, reqs, tb, ta in tenant_rows
+            },
         }
 
     def close(self) -> None:
@@ -146,6 +163,17 @@ class SqliteMetricsSink:
 
 def _as_int(ok: bool | None) -> int | None:
     return None if ok is None else int(ok)
+
+
+def _tenant_summary(requests: int, before: int, after: int) -> dict[str, Any]:
+    saved = before - after
+    return {
+        "requests": requests,
+        "tokens_before": before,
+        "tokens_after": after,
+        "tokens_saved": saved,
+        "reduction": round(saved / before, 4) if before else 0.0,
+    }
 
 
 def _stage_summary(before: int, after: int, checked: int, oks: int) -> dict[str, Any]:
