@@ -134,3 +134,16 @@ def test_encryption_missing_keyfile_is_rejected() -> None:
 def test_encryption_key_is_not_exposed_in_repr() -> None:
     s = Settings(_env_file=None, cache_encryption=True, cache_encryption_key=_b64key())
     assert "\x07" * 32 not in repr(s)  # SecretStr masks the value
+
+
+def test_learned_disabled_by_default() -> None:
+    s = Settings(_env_file=None)
+    assert s.learned is False
+    assert s.learned_ratio == 0.5
+
+
+def test_learned_ratio_out_of_range_rejected() -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, learned_ratio=0.0)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, learned_ratio=1.5)

@@ -67,6 +67,19 @@ def test_build_engine_uses_null_when_no_passes() -> None:
     assert isinstance(engine._compressor, NullCompressor)
 
 
+def test_build_engine_wires_learned_tier_when_enabled() -> None:
+    # learned=True appends the Tier-2 LearnedCompressor (model loads lazily, so no extra needed
+    # to construct it). With lossless also on, that's a chain.
+    from parsimony.compress import ChainCompressor, LearnedCompressor
+
+    engine = cli.build_engine(Settings(_env_file=None, cache=False, metrics=False, learned=True))
+    assert isinstance(engine._compressor, ChainCompressor)
+    only_learned = cli.build_engine(
+        Settings(_env_file=None, cache=False, metrics=False, lossless=False, learned=True)
+    )
+    assert isinstance(only_learned._compressor, LearnedCompressor)
+
+
 def test_build_engine_wires_rate_limiter_when_configured() -> None:
     engine = cli.build_engine(
         Settings(_env_file=None, cache=False, metrics=False, rate_limit_per_minute=60)

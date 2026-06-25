@@ -166,8 +166,11 @@ keep the winners.
   dashboard of savings.
 - **M3:** Graph memory Track A hardening + Track B (context retrieval) behind the `MemoryPort`.
 - **M4:** Track C (compaction); optional Tier-2 learned compressor (local); embedding-similarity
-  cache mode (opt-in).
-- **M5:** Hosted-ready hardening (multi-tenancy, authn) — only if pursued.
+  cache mode (opt-in). ✅ delivered — compaction (ADR 0002), similarity cache (ADR 0004),
+  Tier-2 learned compressor (ADR 0006).
+- **M5:** Hosted-ready hardening (multi-tenancy, authn) — only if pursued. ✅ delivered (ADR 0003:
+  cache isolation, edge authz, per-tenant memory, rate limiting, metrics attribution).
+- Plus, beyond the original plan: at-rest cache encryption (ADR 0005).
 
 Each milestone is "done" only at the master §8 bar (tests/gates/docs/threat-model-as-needed).
 

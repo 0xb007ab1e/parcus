@@ -42,7 +42,8 @@ class Settings(BaseSettings):
 
     lossless: bool = True
     filler: bool = False
-    learned: bool = False
+    learned: bool = False  # Tier-2 local learned compressor (opt-in; needs the 'learned' extra)
+    learned_ratio: float = 0.5  # target fraction of prose tokens to keep
 
     cache: bool = True
     cache_ttl_seconds: int = 86_400
@@ -105,6 +106,14 @@ class Settings(BaseSettings):
         """Require the cosine threshold in [0, 1] (fail fast on misconfig)."""
         if not 0.0 <= value <= 1.0:
             raise ValueError("similarity_threshold must be in [0.0, 1.0]")
+        return value
+
+    @field_validator("learned_ratio")
+    @classmethod
+    def _reject_out_of_range_ratio(cls, value: float) -> float:
+        """Require the learned keep-ratio in (0, 1] (fail fast on misconfig)."""
+        if not 0.0 < value <= 1.0:
+            raise ValueError("learned_ratio must be in (0.0, 1.0]")
         return value
 
     @field_validator("host")

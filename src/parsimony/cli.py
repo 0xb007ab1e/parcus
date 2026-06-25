@@ -22,6 +22,8 @@ from parsimony.compress import (
     DEFAULT_FILLERS,
     ChainCompressor,
     FillerCompressor,
+    LearnedCompressor,
+    LLMLinguaReducer,
     LosslessCompressor,
     NullCompressor,
 )
@@ -85,6 +87,10 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
         passes.append(LosslessCompressor(verify_sample=rate))
     if settings.filler:
         passes.append(FillerCompressor(verify_sample=rate))
+    if settings.learned:
+        # Local LLMLingua reducer; model loads lazily on first use (the 'learned' extra). Last
+        # in the chain — operate on already-losslessly/filler-trimmed prose.
+        passes.append(LearnedCompressor(LLMLinguaReducer(), keep_ratio=settings.learned_ratio))
     compressor: CompressorPort
     if not passes:
         compressor = NullCompressor()
