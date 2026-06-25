@@ -55,6 +55,7 @@ from parsimony.ports import CachePort, CompressorPort
 from parsimony.proxy import create_app
 from parsimony.proxy.engine import EngineConfig, ProxyEngine
 from parsimony.proxy.upstream import HttpxUpstream
+from parsimony.quota import RateLimiter
 from parsimony.redact import Redactor
 from parsimony.tenant import derive_tenant
 
@@ -103,6 +104,8 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
     )
     metrics_sink = metrics if metrics is not None else _build_metrics(settings)[0]
     memory_provider = _build_memory_provider(settings)
+    rate_limit = settings.rate_limit()
+    rate_limiter = RateLimiter(rate_limit) if rate_limit is not None else None
     return ProxyEngine(
         upstream=HttpxUpstream(),
         compressor=compressor,
@@ -127,6 +130,7 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
         ),
         metrics=metrics_sink,
         memory_provider=memory_provider,
+        rate_limiter=rate_limiter,
     )
 
 

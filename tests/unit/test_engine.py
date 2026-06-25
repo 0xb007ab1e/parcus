@@ -52,6 +52,7 @@ def _engine(upstream: FakeUpstream, **kw: object) -> ProxyEngine:
             allowed_tenants=kw.get("allowed_tenants", frozenset()),  # type: ignore[arg-type]
         ),
         metrics=kw.get("metrics"),  # type: ignore[arg-type]
+        rate_limiter=kw.get("rate_limiter"),  # type: ignore[arg-type]
     )
 
 
@@ -277,3 +278,35 @@ class TestEdgeAuthorization:
         )
         assert result.status_code == 200
         assert up.calls == 1
+
+
+class TestRateLimiting:
+    """A per-tenant rate limiter sheds over-limit requests with 429 before any upstream call."""
+
+    async def test_over_limit_request_gets_429_with_retry_after(self) -> None:
+        from parsimony.quota import RateLimit, RateLimiter
+
+        up = FakeUpstream()
+        limiter = RateLimiter(RateLimit(capacity=1, refill_per_sec=1.0))
+        eng = _engine(up, cache_enabled=False, rate_limiter=limiter)
+        body = _anthropic("hi")
+        first = await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], body)
+        second = await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], body)
+        assert first.status_code == 200
+        assert second.status_code == 429
+        assert second.meta["rate"] == "limited"
+        assert dict(second.headers).get("retry-after") == "1"
+        assert up.calls == 1  # the limited request never reached the provider
+
+    async def test_rate_limit_is_per_tenant(self) -> None:
+        from parsimony.quota import RateLimit, RateLimiter
+
+        up = FakeUpstream()
+        limiter = RateLimiter(RateLimit(capacity=1, refill_per_sec=1.0))
+        eng = _engine(up, cache_enabled=False, multi_tenant=True, rate_limiter=limiter)
+        body = _anthropic("hi")
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "tenant-a")], body)
+        a2 = await eng.handle("POST", "/v1/messages", [("x-api-key", "tenant-a")], body)
+        b1 = await eng.handle("POST", "/v1/messages", [("x-api-key", "tenant-b")], body)
+        assert a2.status_code == 429  # tenant a exhausted its bucket
+        assert b1.status_code == 200  # tenant b has its own bucket

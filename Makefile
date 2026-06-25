@@ -43,6 +43,7 @@ cov-critical: ## Enforce 100% coverage on critical paths (transform/decision/det
 	  --cov=parsimony.cache.key --cov=parsimony.cache.policy --cov=parsimony.redact \
 	  --cov=parsimony.invariants --cov=parsimony.eval.equivalence --cov=parsimony.eval.quality \
 	  --cov=parsimony.memory.compaction --cov=parsimony.memory.provider --cov=parsimony.tenant \
+	  --cov=parsimony.quota \
 	  --cov-branch --cov-fail-under=100 --cov-report=term-missing
 
 eval: ## Measure token savings + lossless equivalence over the built-in corpus

@@ -41,6 +41,7 @@ Processes: the proxy. Data stores: the SQLite cache/graph (confidential).
 | D1 | Proxy outage stalls every harness turn (D) | proxy | **Fail open**: on proxy/internal error, forward original request; upstream timeouts + circuit-break; bounded local work; streaming passthrough. |
 | D2 | Cache/graph store unbounded growth (D) | TB3 | TTL + size caps + eviction (`topic-caching`); store is a perf layer, correct when empty. |
 | D3 | Compression cost exceeds the savings (D) | proxy | Local transforms are fast + bounded; latency budget per call; heavy local models opt-in only. |
+| D4 | One tenant exhausts cost/capacity, degrading others (D) | proxy | Hosted mode: optional per-tenant **token-bucket rate limit** → 429 + Retry-After before forwarding (noisy-neighbour; OWASP LLM04/API4 unrestricted resource consumption). Fail-closed against abuse. See ADR 0003. |
 | E1 | Cross-context cache reuse serves A's data to B (E) | TB3 | Exact/normalized-hash key includes full salient context; in hosted/multi-tenant mode the key is namespaced by a tenant id **derived server-side from the inbound credential** (never a client field — BOLA/API1), so one tenant can never read another's cached response; similarity reuse off by default. See ADR 0003. |
 | E2 | Compromised proxy escalates via held keys (E) | proxy | Least privilege; keys scoped to forwarding; no shell/file/network beyond provider allow-list; minimal dependencies (`std-supplychain`). |
 

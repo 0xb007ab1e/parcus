@@ -53,13 +53,11 @@ the proxy without rotating the provider key — defence in depth, not a replacem
 
 ## Scope / what's still deferred
 
-Delivered: **cache scoping** (slice 1), **edge authorization** (slice 2), and **per-tenant memory
-isolation** (slice 3 — below). Remaining hosted-mode slices, deferred to keep changes small:
+Delivered: **cache scoping** (slice 1), **edge authorization** (slice 2), **per-tenant memory
+isolation** (slice 3 — below), and **per-tenant rate limiting** (slice 4 — below). Remaining:
 
 - **Per-tenant metrics tagging** — metrics are content-free counts (no cross-tenant *leak*), so
   this is tenant attribution for billing/support, not an isolation boundary; lower priority.
-- **Per-tenant quotas / rate limits** — bound cost and prevent noisy-neighbour abuse
-  (`topic-multi-tenancy`, `std-owasp-api` API4).
 
 ## Per-tenant memory isolation (slice 3 — delivered)
 
@@ -78,11 +76,27 @@ E1. A `MemoryProvider` seam resolves the right graph for a tenant **before** any
 This makes hosted memory injection **safe to enable** — though it remains off by default until an
 operator opts in.
 
+## Per-tenant rate limiting (slice 4 — delivered)
+
+To bound cost and stop one tenant degrading others (OWASP LLM04 / API4 unrestricted resource
+consumption; noisy-neighbour), each tenant gets an independent **token bucket**:
+
+- `parsimony.quota.RateLimiter` — `capacity` burst tokens refilling at `refill_per_sec`; each
+  request consumes one. Empty bucket → the engine returns **429 + `Retry-After`** *before* any
+  upstream call. Elapsed time uses a **monotonic** source so an NTP step can't grant/revoke
+  tokens; buckets are per-key (tenant id). In the 100%-critical gate.
+- `Settings.rate_limit_per_minute` / `rate_limit_burst` (`PARSIMONY_RATE_LIMIT_*`); `0` disables
+  (default). A `field_validator` rejects negatives. Keyed by the derived tenant id — one shared
+  bucket in single-tenant mode, per-tenant when `multi_tenant` is on.
+
+This control **fails closed** against abuse (shed the request), distinct from the optimization
+path, which fails open.
+
 ## Consequences
 
-- Hosted operators get cache isolation, an edge allow-list, and isolated per-tenant memory with
-  one-flag opt-ins, and no change to local single-tenant users.
+- Hosted operators get cache isolation, an edge allow-list, isolated per-tenant memory, and
+  per-tenant rate limiting with one-flag opt-ins, and no change to local single-tenant users.
 - The digest is opaque and not exposed in any response header, so enabling multi-tenant mode
   does not leak which tenant served a request.
-- Metrics remain a shared, content-free aggregate (no leak); per-tenant attribution and quotas
-  are the remaining hosted-mode work.
+- Metrics remain a shared, content-free aggregate (no leak); per-tenant metrics *attribution*
+  (tagging) is the remaining hosted-mode work.

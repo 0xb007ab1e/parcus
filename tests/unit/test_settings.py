@@ -51,3 +51,20 @@ def test_allow_list_without_multi_tenant_is_rejected() -> None:
 def test_allow_list_with_multi_tenant_is_accepted() -> None:
     s = Settings(_env_file=None, allowed_tenants="abc", multi_tenant=True)
     assert s.allowed_tenant_set() == frozenset({"abc"})
+
+
+def test_rate_limit_disabled_by_default() -> None:
+    assert Settings(_env_file=None).rate_limit() is None
+
+
+def test_rate_limit_built_when_configured() -> None:
+    s = Settings(_env_file=None, rate_limit_per_minute=120, rate_limit_burst=30)
+    limit = s.rate_limit()
+    assert limit is not None
+    assert limit.capacity == 30
+    assert limit.refill_per_sec == 2.0  # 120/min
+
+
+def test_negative_rate_limit_rejected() -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, rate_limit_per_minute=-1)

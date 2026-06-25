@@ -67,6 +67,18 @@ def test_build_engine_uses_null_when_no_passes() -> None:
     assert isinstance(engine._compressor, NullCompressor)
 
 
+def test_build_engine_wires_rate_limiter_when_configured() -> None:
+    engine = cli.build_engine(
+        Settings(_env_file=None, cache=False, metrics=False, rate_limit_per_minute=60)
+    )
+    assert engine._rate_limiter is not None
+
+
+def test_build_engine_has_no_rate_limiter_by_default() -> None:
+    engine = cli.build_engine(Settings(_env_file=None, cache=False, metrics=False))
+    assert engine._rate_limiter is None
+
+
 def test_stats_command_runs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

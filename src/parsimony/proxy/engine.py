@@ -10,6 +10,7 @@ changes a result to save tokens.
 from __future__ import annotations
 
 import json
+import math
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -25,6 +26,7 @@ from parsimony.obs import MetricsSink, NullSink, SavingsEvent, StageStat
 from parsimony.ports import CachePort, CompressorPort, MemoryPort, RedactorPort, TokenizerPort
 from parsimony.proxy.dialects import detect, parse, serialize
 from parsimony.proxy.upstream import UpstreamPort, UpstreamRequest, UpstreamResponse
+from parsimony.quota import RateLimiter
 from parsimony.tenant import derive_tenant, is_authorized
 from parsimony.tokenize import default_tokenizer
 
@@ -96,6 +98,7 @@ class ProxyEngine:
         metrics: MetricsSink | None = None,
         memory: MemoryPort | None = None,
         memory_provider: MemoryProvider | None = None,
+        rate_limiter: RateLimiter | None = None,
         tokenizer: TokenizerPort | None = None,
         summarizer: Summarizer | None = None,
     ) -> None:
@@ -103,6 +106,7 @@ class ProxyEngine:
 
         ``memory_provider`` resolves the per-tenant memory; if omitted, ``memory`` is wrapped in a
         :class:`SharedMemoryProvider` (one graph for all tenants — single-tenant behaviour).
+        ``rate_limiter`` (when given) caps per-tenant request rate; ``None`` disables limiting.
         """
         self._upstream = upstream
         self._compressor = compressor
@@ -112,6 +116,7 @@ class ProxyEngine:
         self._config = config
         self._metrics = metrics or NullSink()
         self._memory_provider = memory_provider or SharedMemoryProvider(memory)
+        self._rate_limiter = rate_limiter
         self._tokenizer = tokenizer or default_tokenizer()
         self._summarizer = summarizer or ExtractiveSummarizer()
 
@@ -180,6 +185,19 @@ class ProxyEngine:
                 content=b'{"error":"parsimony: tenant not authorized"}',
                 meta={**meta, "auth": "denied"},
             )
+        if self._rate_limiter is not None:
+            decision = self._rate_limiter.check(tenant)
+            if not decision.allowed:
+                # Fail closed against abuse: shed the request before it reaches an upstream.
+                return ProxyResult(
+                    status_code=429,
+                    headers=[
+                        ("content-type", "application/json"),
+                        ("retry-after", str(math.ceil(decision.retry_after))),
+                    ],
+                    content=b'{"error":"parsimony: rate limit exceeded"}',
+                    meta={**meta, "rate": "limited"},
+                )
 
         canonical = self._canonicalize(dialect, body)
         if canonical is not None:

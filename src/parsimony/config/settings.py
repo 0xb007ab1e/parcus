@@ -5,6 +5,8 @@ from __future__ import annotations
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from parsimony.quota import RateLimit
+
 __all__ = ["Settings"]
 
 # Values we REFUSE to bind (never public/all-interfaces — tailnet rule). The 0.0.0.0 literal
@@ -64,6 +66,18 @@ class Settings(BaseSettings):
     # Optional edge authorization: comma-separated allow-list of permitted tenant ids (the
     # digests from `parsimony tenant-id`). Empty = open. Requires multi_tenant (validated below).
     allowed_tenants: str = ""
+    # Optional per-tenant rate limit (token bucket). 0 = disabled. Keyed by the derived tenant id
+    # (one shared bucket in single-tenant mode); burst 0 defaults capacity to one minute's worth.
+    rate_limit_per_minute: float = 0.0
+    rate_limit_burst: float = 0.0
+
+    @field_validator("rate_limit_per_minute", "rate_limit_burst")
+    @classmethod
+    def _reject_negative_rate(cls, value: float) -> float:
+        """Reject a negative rate/burst (fail fast on misconfig)."""
+        if value < 0:
+            raise ValueError("rate limit values must be >= 0 (0 disables limiting)")
+        return value
 
     @field_validator("host")
     @classmethod
@@ -98,3 +112,9 @@ class Settings(BaseSettings):
     def allowed_tenant_set(self) -> frozenset[str]:
         """Return the configured edge-authorization allow-list (comma-separated env → set)."""
         return frozenset(t.strip() for t in self.allowed_tenants.split(",") if t.strip())
+
+    def rate_limit(self) -> RateLimit | None:
+        """Return the configured per-tenant rate limit, or ``None`` when disabled (rate 0)."""
+        if self.rate_limit_per_minute <= 0:
+            return None
+        return RateLimit.per_minute(self.rate_limit_per_minute, self.rate_limit_burst)
