@@ -7,7 +7,12 @@ import os
 import pytest
 
 from parsimony.cache import SqliteCache
-from parsimony.cache.encryption import CacheCipher, EncryptedCache
+from parsimony.cache.encryption import (
+    CacheCipher,
+    EncryptedCache,
+    StaticCipherProvider,
+    TenantCipherProvider,
+)
 from parsimony.model import CachedResponse
 
 _KEY = b"\x00" * 32
@@ -158,3 +163,75 @@ class TestEncryptedCache:
                 return None
 
         EncryptedCache(_NoCloseCache(), CacheCipher(_KEY)).close()  # no raise
+
+
+def _resp(body: bytes = b"secret") -> CachedResponse:
+    return CachedResponse(status_code=200, body=body, content_type=None)
+
+
+class TestTenantCipherProvider:
+    def test_distinct_dek_per_tenant(self) -> None:
+        provider = TenantCipherProvider(_KEY)
+        # A blob sealed for tenant a can't be opened with tenant b's cipher (distinct DEKs).
+        a, b = provider.for_tenant("a"), provider.for_tenant("b")
+        assert a is not None and b is not None
+        blob = a.seal("k", b"data")
+        assert b.open("k", blob) is None
+        assert a.open("k", blob) == b"data"
+
+    def test_same_tenant_same_cipher(self) -> None:
+        provider = TenantCipherProvider(_KEY)
+        assert provider.for_tenant("a") is provider.for_tenant("a")  # cached
+
+    def test_shredded_tenant_has_no_key(self) -> None:
+        provider = TenantCipherProvider(_KEY, shredded=frozenset({"gone"}))
+        assert provider.for_tenant("gone") is None
+        assert provider.for_tenant("present") is not None
+
+    def test_master_rotation_derives_previous_dek(self) -> None:
+        # An entry sealed under the old master's per-tenant DEK opens after rotating the master.
+        old_blob = TenantCipherProvider(_KEY).for_tenant("t").seal("k", b"old")  # type: ignore[union-attr]
+        rotated = TenantCipherProvider(_KEY2, previous_master_keys=(_KEY,))
+        assert rotated.for_tenant("t").open("k", old_blob) == b"old"  # type: ignore[union-attr]
+
+    def test_rejects_wrong_length_master(self) -> None:
+        with pytest.raises(ValueError, match="32 bytes"):
+            TenantCipherProvider(b"short")
+
+
+class TestEncryptedCacheWithProvider:
+    def test_requires_exactly_one_of_cipher_or_provider(self) -> None:
+        with pytest.raises(ValueError, match="exactly one"):
+            EncryptedCache(SqliteCache())  # neither
+        with pytest.raises(ValueError, match="exactly one"):
+            EncryptedCache(
+                SqliteCache(), CacheCipher(_KEY), provider=StaticCipherProvider(CacheCipher(_KEY))
+            )
+
+    def test_per_tenant_round_trip(self) -> None:
+        enc = EncryptedCache(SqliteCache(), provider=TenantCipherProvider(_KEY))
+        enc.put("k", _resp(b"tenant-a data"), 60, tenant="a")
+        got = enc.get("k", tenant="a")
+        assert got is not None and got.body == b"tenant-a data"
+
+    def test_shredded_tenant_reads_miss_and_writes_skip(self) -> None:
+        inner = SqliteCache()
+        # Tenant 'gone' caches normally...
+        live = EncryptedCache(inner, provider=TenantCipherProvider(_KEY))
+        live.put("k", _resp(b"to be erased"), 60, tenant="gone")
+        assert live.get("k", tenant="gone") is not None
+        # ...then is shredded: its key is withheld -> existing entry inaccessible, new writes skip.
+        shredded = EncryptedCache(
+            inner, provider=TenantCipherProvider(_KEY, shredded=frozenset({"gone"}))
+        )
+        assert shredded.get("k", tenant="gone") is None  # erased
+        shredded.put("k2", _resp(b"nope"), 60, tenant="gone")
+        assert inner.get("k2") is None  # nothing written for a shredded tenant
+
+    def test_one_tenant_cannot_decrypt_anothers_entry(self) -> None:
+        # Even at the same cache key, tenant b's DEK can't open tenant a's ciphertext.
+        inner = SqliteCache()
+        enc = EncryptedCache(inner, provider=TenantCipherProvider(_KEY))
+        enc.put("shared-key", _resp(b"a-only"), 60, tenant="a")
+        assert enc.get("shared-key", tenant="b") is None
+        assert enc.get("shared-key", tenant="a").body == b"a-only"  # type: ignore[union-attr]

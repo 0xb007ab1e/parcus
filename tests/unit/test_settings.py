@@ -196,6 +196,30 @@ def test_invalid_previous_key_rejected() -> None:
         )
 
 
+def test_shredded_tenants_parsing() -> None:
+    s = Settings(
+        _env_file=None,
+        cache_encryption=True,
+        cache_encryption_key=_b64key(),
+        multi_tenant=True,
+        cache_shredded_tenants="a, b ,",
+    )
+    assert s.cache_shredded_tenant_set() == frozenset({"a", "b"})
+
+
+def test_shredding_requires_encryption_and_multi_tenant() -> None:
+    # Shredding withholds a per-tenant key, which only exists under encryption + multi-tenant.
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, cache_shredded_tenants="a")  # neither enabled
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            cache_encryption=True,
+            cache_encryption_key=_b64key(),
+            cache_shredded_tenants="a",  # encryption but not multi_tenant
+        )
+
+
 def test_learned_disabled_by_default() -> None:
     s = Settings(_env_file=None)
     assert s.learned is False

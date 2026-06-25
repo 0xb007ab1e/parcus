@@ -91,12 +91,16 @@ class CachePort(Protocol):
     cache is empty or unavailable.
     """
 
-    def get(self, key: str) -> CachedResponse | None:
-        """Return the cached response for ``key`` if present and unexpired, else ``None``."""
+    def get(self, key: str, *, tenant: str = "") -> CachedResponse | None:
+        """Return the cached response for ``key`` if present and unexpired, else ``None``.
+
+        ``tenant`` is the credential-derived tenant id (empty in single-tenant mode); plain stores
+        ignore it, while an encrypting cache uses it to select the per-tenant key.
+        """
         ...
 
-    def put(self, key: str, value: CachedResponse, ttl_seconds: int) -> None:
-        """Store ``value`` under ``key`` with a time-to-live in seconds."""
+    def put(self, key: str, value: CachedResponse, ttl_seconds: int, *, tenant: str = "") -> None:
+        """Store ``value`` under ``key`` with a time-to-live in seconds (``tenant`` as in get)."""
         ...
 
 

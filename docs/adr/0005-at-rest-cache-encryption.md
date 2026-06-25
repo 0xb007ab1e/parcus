@@ -51,7 +51,7 @@ model deferred at-rest encryption ("M2+"); this ADR delivers it.
   list; entries sealed before the rotation stay readable through the overlap, then age out by
   TTL, after which the old key can be dropped — no cache loss, no plaintext exposure. Trying a
   few keys on a read is cheap and the blob carries no key id (doesn't reveal which key sealed an
-  entry). **Crypto-shredding** per tenant (drop a tenant's key to erase their cached data)
-  composes naturally with the ADR 0003 tenant identity — a future slice.
+  entry). **Crypto-shredding** per tenant (drop a tenant's key to erase their cached data) is
+  delivered in **ADR 0007** (per-tenant DEKs + withheld-key shredding).
 - No remote KMS integration yet (keys are env/keyfile); a KMS-backed key provider is a possible
   follow-up for cloud deployments.

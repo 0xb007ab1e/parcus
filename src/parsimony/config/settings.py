@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     # window: rotate by making the new key current and moving the old key here; drop it once old
     # entries have expired by TTL.
     cache_encryption_previous_keys: SecretStr = SecretStr("")
+    # Crypto-shredding (right-to-erasure): comma-separated tenant ids whose per-tenant key is
+    # withheld → their cached data is instantly inaccessible. Requires multi_tenant + encryption.
+    cache_shredded_tenants: str = ""
 
     redact: bool = True
     log_level: str = "INFO"
@@ -160,6 +163,12 @@ class Settings(BaseSettings):
             raise ValueError(
                 "PARSIMONY_CACHE_ENCRYPTION_PREVIOUS_KEYS must all be valid base64-encoded "
                 "32-byte keys"
+            )
+        # Crypto-shredding needs per-tenant DEKs, which exist only under multi_tenant + encryption.
+        if self.cache_shredded_tenant_set() and not (self.cache_encryption and self.multi_tenant):
+            raise ValueError(
+                "PARSIMONY_CACHE_SHREDDED_TENANTS requires PARSIMONY_CACHE_ENCRYPTION=true and "
+                "PARSIMONY_MULTI_TENANT=true (shredding withholds a per-tenant encryption key)"
             )
         return self
 
@@ -244,3 +253,7 @@ class Settings(BaseSettings):
         return tuple(
             raw for s in self._previous_key_strings() if (raw := _decode_key(s)) is not None
         )
+
+    def cache_shredded_tenant_set(self) -> frozenset[str]:
+        """Return the set of crypto-shredded tenant ids (comma-separated env → set)."""
+        return frozenset(t.strip() for t in self.cache_shredded_tenants.split(",") if t.strip())

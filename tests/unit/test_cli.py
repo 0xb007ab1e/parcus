@@ -158,6 +158,27 @@ def test_build_engine_cache_unencrypted_by_default() -> None:
     assert isinstance(engine._cache, SqliteCache)
 
 
+def test_build_engine_uses_per_tenant_dek_in_multi_tenant_mode() -> None:
+    import base64
+
+    from parsimony.cache.encryption import EncryptedCache, TenantCipherProvider
+
+    key = base64.b64encode(b"\x05" * 32).decode()
+    engine = cli.build_engine(
+        Settings(
+            _env_file=None,
+            metrics=False,
+            cache_encryption=True,
+            cache_encryption_key=key,
+            multi_tenant=True,
+            cache_shredded_tenants="ghost",
+        )
+    )
+    assert isinstance(engine._cache, EncryptedCache)
+    assert isinstance(engine._cache._provider, TenantCipherProvider)
+    assert engine._cache._provider.for_tenant("ghost") is None  # shredded
+
+
 def test_eval_similarity_command_runs(capsys: pytest.CaptureFixture[str]) -> None:
     # The default (lexical) embedder fails the adversarial built-in set -> exit 1, by design:
     # the gate is signalling that the dependency-free embedder is unsafe for semantic caching.

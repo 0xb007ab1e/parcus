@@ -155,12 +155,19 @@ def _maybe_encrypt(cache: CachePort, settings: Settings) -> CachePort:
     """
     if not settings.cache_encryption:
         return cache
-    from parsimony.cache.encryption import CacheCipher, EncryptedCache
+    from parsimony.cache.encryption import CacheCipher, EncryptedCache, TenantCipherProvider
 
     key = settings.cache_encryption_key_bytes()
     if key is None:  # defensive: settings validation already guarantees a key here (fail closed)
         raise RuntimeError("cache encryption enabled without a valid key")
     previous = settings.cache_encryption_previous_key_bytes()
+    if settings.multi_tenant:
+        # Per-tenant DEKs derived from the master key, with crypto-shredding by withheld key.
+        provider = TenantCipherProvider(
+            key, previous_master_keys=previous, shredded=settings.cache_shredded_tenant_set()
+        )
+        return EncryptedCache(cache, provider=provider)
+    # Single-tenant: one cipher straight from the master key (unchanged behaviour).
     return EncryptedCache(cache, CacheCipher(key, previous_keys=previous))
 
 

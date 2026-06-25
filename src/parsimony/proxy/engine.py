@@ -218,7 +218,7 @@ class ProxyEngine:
             # Compacted bodies depend on evolving memory state, so they are not cached.
             cache_key = None if compacted else self._maybe_cache_key(canonical, tenant)
             if cache_key is not None:
-                hit = self._cache.get(cache_key)
+                hit = self._cache.get(cache_key, tenant=tenant)
                 if hit is not None:
                     return self._from_cache(hit, meta)
                 meta["cache"] = "miss"
@@ -235,7 +235,7 @@ class ProxyEngine:
             )
         )
         if cache_key is not None and 200 <= response.status_code < 300:
-            self._store(cache_key, response)
+            self._store(cache_key, response, tenant)
             if self._similarity is not None and canonical is not None:
                 self._similarity.remember(
                     text=canonical.text, key=cache_key, model=canonical.model, tenant=tenant
@@ -377,9 +377,9 @@ class ProxyEngine:
         )
         if neighbour is None:
             return None
-        return self._cache.get(neighbour)
+        return self._cache.get(neighbour, tenant=tenant)
 
-    def _store(self, key: str, response: UpstreamResponse) -> None:
+    def _store(self, key: str, response: UpstreamResponse, tenant: str = "") -> None:
         self._cache.put(
             key,
             CachedResponse(
@@ -388,6 +388,7 @@ class ProxyEngine:
                 content_type=_content_type(response.headers),
             ),
             self._config.cache_ttl_seconds,
+            tenant=tenant,
         )
 
     def _from_cache(

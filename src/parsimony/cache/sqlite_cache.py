@@ -57,8 +57,12 @@ class SqliteCache:
         with self._conn:
             self._conn.execute(_SCHEMA)
 
-    def get(self, key: str) -> CachedResponse | None:
-        """Return the unexpired cached response for ``key``, else ``None`` (fails open)."""
+    def get(self, key: str, *, tenant: str = "") -> CachedResponse | None:
+        """Return the unexpired cached response for ``key``, else ``None`` (fails open).
+
+        ``tenant`` is accepted for interface parity (the encrypting wrapper uses it) and ignored
+        here — entries are already keyed by the tenant-namespaced hash.
+        """
         try:
             with self._lock:
                 row = self._conn.execute(
@@ -82,8 +86,11 @@ class SqliteCache:
             # Fail open: a cache read must never break the request path.
             return None
 
-    def put(self, key: str, value: CachedResponse, ttl_seconds: int) -> None:
-        """Store ``value`` under ``key`` for ``ttl_seconds`` (no-op on error or ttl<=0)."""
+    def put(self, key: str, value: CachedResponse, ttl_seconds: int, *, tenant: str = "") -> None:
+        """Store ``value`` under ``key`` for ``ttl_seconds`` (no-op on error or ttl<=0).
+
+        ``tenant`` is accepted for interface parity and ignored here.
+        """
         if ttl_seconds <= 0:
             return
         try:

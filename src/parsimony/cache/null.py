@@ -10,10 +10,10 @@ __all__ = ["NullCache"]
 class NullCache:
     """Never stores and always misses. Implements :class:`parsimony.ports.CachePort`."""
 
-    def get(self, key: str) -> CachedResponse | None:
+    def get(self, key: str, *, tenant: str = "") -> CachedResponse | None:
         """Always return ``None`` (cache miss)."""
         return None
 
-    def put(self, key: str, value: CachedResponse, ttl_seconds: int) -> None:
+    def put(self, key: str, value: CachedResponse, ttl_seconds: int, *, tenant: str = "") -> None:
         """Discard the entry (no-op)."""
         return
