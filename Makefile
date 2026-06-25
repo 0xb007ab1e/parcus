@@ -18,12 +18,12 @@ setup: ## Create venv and install dev deps + pre-commit hooks
 	-$(VENV)/bin/pre-commit install
 
 fmt: ## Auto-format
-	$(VENV)/bin/ruff format src tests
-	$(VENV)/bin/ruff check --fix src tests
+	$(VENV)/bin/ruff format src tests scripts
+	$(VENV)/bin/ruff check --fix src tests scripts
 
 lint: ## Lint (no changes)
-	$(VENV)/bin/ruff check src tests
-	$(VENV)/bin/ruff format --check src tests
+	$(VENV)/bin/ruff check src tests scripts
+	$(VENV)/bin/ruff format --check src tests scripts
 
 typecheck: ## Strict type check
 	MYPYPATH=src $(VENV)/bin/mypy src
@@ -52,7 +52,10 @@ eval: ## Measure token savings + lossless equivalence over the built-in corpus
 docs: ## Generate API docs (pdoc)
 	$(VENV)/bin/pdoc -o site parcus
 
-check: lint typecheck security test cov-critical ## Everything CI runs
+docs-links: ## Check Markdown for broken relative links + anchors (hermetic)
+	$(PY) scripts/check_links.py
+
+check: lint typecheck security test cov-critical docs-links ## Everything CI runs
 
 serve: ## Run the proxy locally (loopback + tailnet)
 	$(PY) -m parcus.cli serve

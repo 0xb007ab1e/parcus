@@ -35,8 +35,11 @@ jobs:
 
       - name: Lint (ruff)
         run: |
-          ruff check src tests
-          ruff format --check src tests
+          ruff check src tests scripts
+          ruff format --check src tests scripts
+
+      - name: Docs link check (relative links + anchors; hermetic)
+        run: python scripts/check_links.py
 
       - name: Type check (mypy strict)
         run: mypy src
