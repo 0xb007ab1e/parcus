@@ -1,0 +1,5 @@
+# schemathesis run artifacts / cassettes.
+*.yaml.cassette
+cassette.*
+*.har
+.hypothesis/

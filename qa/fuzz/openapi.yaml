@@ -1,0 +1,75 @@
+# Minimal OpenAPI description of parcus's request edge, used ONLY to drive schemathesis fuzzing.
+# parcus is a transparent proxy, not the API itself, so this is not a contract it serves — it is
+# a generator seed: schemathesis produces conforming AND malformed/boundary requests from it and
+# fires them at a running `parcus serve`. The single check we run is `not_a_server_error`: parcus
+# must NEVER answer with a 5xx, no matter how broken the input — it fails open (forwards/handles)
+# or returns a deliberate 4xx/502, but never crashes. See run.sh / README.md.
+openapi: 3.0.3
+info:
+  title: parcus request edge (fuzz seed)
+  version: 0.1.0
+paths:
+  /v1/messages:
+    post:
+      summary: Anthropic Messages dialect
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model, messages]
+              properties:
+                model:
+                  type: string
+                stream:
+                  type: boolean
+                system:
+                  type: string
+                messages:
+                  type: array
+                  items:
+                    type: object
+                    required: [role, content]
+                    properties:
+                      role:
+                        type: string
+                        enum: [user, assistant]
+                      content:
+                        type: string
+      responses:
+        "200":
+          description: relayed provider response
+        default:
+          description: client error or routing failure
+  /v1/chat/completions:
+    post:
+      summary: OpenAI Chat Completions dialect
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model, messages]
+              properties:
+                model:
+                  type: string
+                stream:
+                  type: boolean
+                messages:
+                  type: array
+                  items:
+                    type: object
+                    required: [role, content]
+                    properties:
+                      role:
+                        type: string
+                        enum: [system, user, assistant]
+                      content:
+                        type: string
+      responses:
+        "200":
+          description: relayed provider response
+        default:
+          description: client error or routing failure
