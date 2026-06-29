@@ -6,6 +6,11 @@ All notable changes to parcus are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- **KMS-backed master key for at-rest encryption (envelope encryption).** A `KeyManagementService`
+  port + `KmsCipherProvider` let the cache's master key be stored only in KMS-*wrapped* form and
+  unwrapped on demand by an injected KMS/HSM adapter (the root key never leaves the KMS). Composes
+  with per-tenant DEKs, crypto-shredding, and rotation; no cloud SDK is a dependency (the adapter
+  is operator-supplied). See ADR 0008.
 - **Property-based invariant tests** (`tests/property/`, Hypothesis): the compression invariants
   (never-expands, immutable spans byte-for-byte, structure preserved, lossless = whitespace-only,
   filler = only allow-listed tokens, deterministic + idempotent) are now checked against

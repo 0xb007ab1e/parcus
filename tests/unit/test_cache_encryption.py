@@ -10,6 +10,7 @@ from parcus.cache import SqliteCache
 from parcus.cache.encryption import (
     CacheCipher,
     EncryptedCache,
+    KmsCipherProvider,
     StaticCipherProvider,
     TenantCipherProvider,
 )
@@ -235,3 +236,85 @@ class TestEncryptedCacheWithProvider:
         enc.put("shared-key", _resp(b"a-only"), 60, tenant="a")
         assert enc.get("shared-key", tenant="b") is None
         assert enc.get("shared-key", tenant="a").body == b"a-only"  # type: ignore[union-attr]
+
+
+class _FakeKms:
+    """A fake KMS: unwraps a wrapped blob by lookup, counting calls (to prove caching)."""
+
+    def __init__(self, mapping: dict[bytes, bytes]) -> None:
+        self._mapping = mapping
+        self.calls = 0
+
+    def decrypt_key(self, wrapped_key: bytes) -> bytes:
+        self.calls += 1
+        return self._mapping[wrapped_key]
+
+
+_WRAPPED = b"wrapped-current"
+_WRAPPED_OLD = b"wrapped-previous"
+
+
+class TestKmsCipherProvider:
+    def test_round_trips_via_kms_unwrapped_master(self) -> None:
+        kms = _FakeKms({_WRAPPED: _KEY})
+        provider = KmsCipherProvider(kms, _WRAPPED)
+        cipher = provider.for_tenant("t")
+        assert cipher is not None
+        blob = cipher.seal("k", b"secret")
+        assert cipher.open("k", blob) == b"secret"
+
+    def test_unwraps_master_only_once(self) -> None:
+        kms = _FakeKms({_WRAPPED: _KEY})
+        provider = KmsCipherProvider(kms, _WRAPPED)
+        for tenant in ("a", "b", "a", "c"):
+            provider.for_tenant(tenant)
+        assert kms.calls == 1  # the KMS is hit once; per-tenant DEKs derive locally after
+
+    def test_shredded_tenant_gets_no_cipher(self) -> None:
+        kms = _FakeKms({_WRAPPED: _KEY})
+        provider = KmsCipherProvider(kms, _WRAPPED, shredded=frozenset({"gone"}))
+        assert provider.for_tenant("gone") is None
+        assert provider.for_tenant("kept") is not None
+
+    def test_per_tenant_deks_are_distinct(self) -> None:
+        provider = KmsCipherProvider(_FakeKms({_WRAPPED: _KEY}), _WRAPPED)
+        a = provider.for_tenant("a")
+        assert a is not None
+        blob = a.seal("k", b"a-secret")
+        b = provider.for_tenant("b")
+        assert b is not None and b.open("k", blob) is None  # b's DEK can't open a's ciphertext
+
+    def test_rotation_opens_entries_sealed_under_a_previous_master(self) -> None:
+        # Seal with the OLD master's DEK; open via a KMS provider whose current master is new and
+        # whose previous (decrypt-only) master is the old one.
+        old_cipher = TenantCipherProvider(_KEY2).for_tenant("t")
+        assert old_cipher is not None
+        blob = old_cipher.seal("k", b"sealed-before-rotation")
+        kms = _FakeKms({_WRAPPED: _KEY, _WRAPPED_OLD: _KEY2})
+        provider = KmsCipherProvider(kms, _WRAPPED, previous_wrapped_master_keys=(_WRAPPED_OLD,))
+        rotated = provider.for_tenant("t")
+        assert rotated is not None
+        assert rotated.open("k", blob) == b"sealed-before-rotation"
+
+    def test_kms_error_propagates_not_swallowed(self) -> None:
+        class _BoomKms:
+            def decrypt_key(self, wrapped_key: bytes) -> bytes:
+                raise RuntimeError("kms unavailable")
+
+        provider = KmsCipherProvider(_BoomKms(), _WRAPPED)
+        with pytest.raises(RuntimeError, match="kms unavailable"):
+            provider.for_tenant("t")
+
+    def test_rejects_non_32_byte_unwrapped_key(self) -> None:
+        provider = KmsCipherProvider(_FakeKms({_WRAPPED: b"short"}), _WRAPPED)
+        with pytest.raises(ValueError, match="32 bytes"):
+            provider.for_tenant("t")
+
+    def test_end_to_end_through_encrypted_cache(self) -> None:
+        inner = SqliteCache()
+        provider = KmsCipherProvider(_FakeKms({_WRAPPED: _KEY}), _WRAPPED)
+        enc = EncryptedCache(inner, provider=provider)
+        enc.put("k", _resp(b"kms-protected"), 60, tenant="t")
+        stored = inner.get("k", tenant="t")
+        assert stored is not None and b"kms-protected" not in stored.body  # ciphertext at rest
+        assert enc.get("k", tenant="t").body == b"kms-protected"  # type: ignore[union-attr]
