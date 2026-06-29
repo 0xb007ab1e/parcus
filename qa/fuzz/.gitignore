@@ -3,3 +3,8 @@
 cassette.*
 *.har
 .hypothesis/
+
+# Atheris/libFuzzer crash inputs + corpus.
+crash-*
+crash_*
+corpus/
