@@ -153,3 +153,37 @@ exclude_also = [
 
 [tool.bandit]
 exclude_dirs = ["tests"]
+
+# ---------------------------------------------------------------------------
+# mutmut — mutation testing (validates the 100%-critical suite actually kills
+# faults; master §4). mutmut is NOT a project dependency: run it ephemerally
+# via `uvx mutmut run` or `make mutate` — nothing here is imported by the package
+# or installed by CI from these deps. Scoped to the critical modules; only
+# test-covered lines are mutated; coverage in addopts is cleared so a mutant's
+# run isn't failed by the >=90% gate.
+# ---------------------------------------------------------------------------
+[tool.mutmut]
+source_paths = ["src"]
+# Mutate the critical modules (mirror of the make cov-critical set). Only these get mutated;
+# the rest of the package is copied but left intact.
+only_mutate = [
+  "*parcus/compress/*.py",
+  "*parcus/model.py",
+  "*parcus/spans.py",
+  "*parcus/cache/key.py",
+  "*parcus/cache/policy.py",
+  "*parcus/cache/similarity.py",
+  "*parcus/cache/encryption.py",
+  "*parcus/redact/*.py",
+  "*parcus/invariants.py",
+  "*parcus/eval/equivalence.py",
+  "*parcus/eval/quality.py",
+  "*parcus/memory/compaction.py",
+  "*parcus/memory/provider.py",
+  "*parcus/tenant.py",
+  "*parcus/quota.py",
+]
+mutate_only_covered_lines = true
+# Clear the repo addopts (--cov ... --cov-fail-under) so a mutant's test run isn't failed by the
+# coverage gate; -x stops each run at the first killing test (faster).
+pytest_add_cli_args = ["-x", "-q", "-o", "addopts=", "-p", "no:cacheprovider"]

@@ -33,6 +33,8 @@ coverage.xml
 .mypy_cache/
 .ruff_cache/
 .hypothesis/
+mutants/
+.mutmut-cache
 
 # --- local model artifacts (lazy-downloaded, not vendored) ---
 models/
