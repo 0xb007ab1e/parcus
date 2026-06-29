@@ -1,0 +1,5 @@
+# ZAP scan output.
+report.html
+report.json
+report.md
+zap.out
