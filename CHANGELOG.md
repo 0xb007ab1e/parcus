@@ -3,6 +3,24 @@
 All notable changes to parcus are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com); versioning is [SemVer](https://semver.org).
 
+## [Unreleased]
+
+### Added
+- **Property-based invariant tests** (`tests/property/`, Hypothesis): the compression invariants
+  (never-expands, immutable spans byte-for-byte, structure preserved, lossless = whitespace-only,
+  filler = only allow-listed tokens, deterministic + idempotent) are now checked against
+  thousands of synthesised requests, not just hand-written cases.
+- **Fault-injection fail-open tests** (`tests/integration/test_fail_open.py`): an adapter that
+  raises at each seam (tokenizer, redactor, cache get/put, similarity lookup/remember, memory
+  ingest, compressor) is asserted to still serve the genuine upstream response.
+
+### Changed
+- **Fail-open hardened (defense in depth).** The engine now guards every trusted-adapter seam,
+  so a *contract-violating* adapter that raises degrades to "skip the optimization, forward the
+  request" instead of crashing it. A redactor error fails **closed** for caching (the request is
+  forwarded but not cached); a tokenizer error drops token metrics to 0 without affecting the
+  request.
+
 ## [0.1.0] - 2026-06-25
 
 First tagged release: a local-first, token-thrift inference proxy for agentic harnesses. Every

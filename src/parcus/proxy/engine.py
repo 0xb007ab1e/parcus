@@ -9,6 +9,7 @@ changes a result to save tokens.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import time
@@ -209,16 +210,15 @@ class ProxyEngine:
         if canonical is not None:
             working, memory_action = self._apply_memory(canonical, tenant)
             out_body, compressed, comp_stats = self._compress_request(working, body)
-            before = self._tokenizer.count(canonical.text, canonical.model)
-            meta["tokens_before"] = before
-            meta["tokens_after"] = self._tokenizer.count(compressed.text, compressed.model)
+            meta["tokens_before"] = self._safe_count(canonical.text, canonical.model)
+            meta["tokens_after"] = self._safe_count(compressed.text, compressed.model)
             meta["memory"] = memory_action
             compacted = working is not canonical
             meta["stages"] = self._stage_stats(canonical, working, compacted, comp_stats)
             # Compacted bodies depend on evolving memory state, so they are not cached.
             cache_key = None if compacted else self._maybe_cache_key(canonical, tenant)
             if cache_key is not None:
-                hit = self._cache.get(cache_key, tenant=tenant)
+                hit = self._cache_get(cache_key, tenant)
                 if hit is not None:
                     return self._from_cache(hit, meta)
                 meta["cache"] = "miss"
@@ -237,9 +237,11 @@ class ProxyEngine:
         if cache_key is not None and 200 <= response.status_code < 300:
             self._store(cache_key, response, tenant)
             if self._similarity is not None and canonical is not None:
-                self._similarity.remember(
-                    text=canonical.text, key=cache_key, model=canonical.model, tenant=tenant
-                )
+                # Best-effort: a similarity-index error must never break the response path.
+                with contextlib.suppress(Exception):
+                    self._similarity.remember(
+                        text=canonical.text, key=cache_key, model=canonical.model, tenant=tenant
+                    )
         return ProxyResult(
             status_code=response.status_code,
             headers=self._response_headers(response.headers),
@@ -248,6 +250,24 @@ class ProxyEngine:
         )
 
     # -- internal helpers (each fails open) -------------------------------------------
+
+    def _safe_count(self, text: str, model: str | None) -> int:
+        """Count tokens for observability, degrading to 0 on any tokenizer error.
+
+        Token counts feed metrics only; a misbehaving tokenizer must never break the request
+        path (fail open — defense in depth against a contract-violating adapter).
+        """
+        try:
+            return self._tokenizer.count(text, model)
+        except Exception:
+            return 0
+
+    def _cache_get(self, key: str, tenant: str) -> CachedResponse | None:
+        """Read from the cache, treating any error as a miss (the cache is a perf layer)."""
+        try:
+            return self._cache.get(key, tenant=tenant)
+        except Exception:
+            return None
 
     def _canonicalize(self, dialect: Dialect, body: bytes) -> CanonicalRequest | None:
         if dialect is Dialect.UNKNOWN or not body:
@@ -330,8 +350,8 @@ class ProxyEngine:
             stages.append(
                 StageStat(
                     stage="memory",
-                    tokens_before=self._tokenizer.count(canonical.text, canonical.model),
-                    tokens_after=self._tokenizer.count(working.text, working.model),
+                    tokens_before=self._safe_count(canonical.text, canonical.model),
+                    tokens_after=self._safe_count(working.text, working.model),
                     ok=self._memory_structural_ok(working),
                 )
             )
@@ -354,9 +374,11 @@ class ProxyEngine:
     def _maybe_cache_key(self, canonical: CanonicalRequest, tenant: str = "") -> str | None:
         if not self._config.cache_enabled or canonical.stream:
             return None
-        if not self._policy.should_cache(canonical, has_secret=self._redactor.has_secret):
-            return None
         try:
+            # The secret check is inside the try so a misbehaving redactor fails *closed* for
+            # caching (no key -> not cached) while the request still forwards (fails open).
+            if not self._policy.should_cache(canonical, has_secret=self._redactor.has_secret):
+                return None
             # Namespace the key per tenant so one tenant can never read another's cached
             # response (BOLA). Empty tenant (single-tenant mode) leaves the salt unchanged.
             salt = f"{self._config.salt}|t:{tenant}" if tenant else self._config.salt
@@ -372,24 +394,29 @@ class ProxyEngine:
         """
         if self._similarity is None or canonical.stream:
             return None
-        neighbour = self._similarity.lookup(
-            text=canonical.text, model=canonical.model, tenant=tenant
-        )
+        try:
+            neighbour = self._similarity.lookup(
+                text=canonical.text, model=canonical.model, tenant=tenant
+            )
+        except Exception:
+            return None  # a misbehaving similarity index degrades to "no near-duplicate"
         if neighbour is None:
             return None
-        return self._cache.get(neighbour, tenant=tenant)
+        return self._cache_get(neighbour, tenant)
 
     def _store(self, key: str, response: UpstreamResponse, tenant: str = "") -> None:
-        self._cache.put(
-            key,
-            CachedResponse(
-                status_code=response.status_code,
-                body=response.content,
-                content_type=_content_type(response.headers),
-            ),
-            self._config.cache_ttl_seconds,
-            tenant=tenant,
-        )
+        # Best-effort: a cache write error must not affect the response already obtained.
+        with contextlib.suppress(Exception):
+            self._cache.put(
+                key,
+                CachedResponse(
+                    status_code=response.status_code,
+                    body=response.content,
+                    content_type=_content_type(response.headers),
+                ),
+                self._config.cache_ttl_seconds,
+                tenant=tenant,
+            )
 
     def _from_cache(
         self, hit: CachedResponse, meta: dict[str, Any], *, outcome: str = "hit"
