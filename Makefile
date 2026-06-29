@@ -3,9 +3,12 @@
 VENV := .venv
 PY := $(VENV)/bin/python
 PIP := $(VENV)/bin/python -m pip
+# Mutation tester is NOT a project dependency — run it ephemerally. Override to use a local
+# install, e.g. `make mutate MUTMUT=$(VENV)/bin/mutmut`.
+MUTMUT ?= uvx mutmut
 export PYTHONPATH := src
 
-.PHONY: help setup fmt lint typecheck security test cov-critical audit check docs serve clean
+.PHONY: help setup fmt lint typecheck security test cov-critical mutate audit check docs serve clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -45,6 +48,10 @@ cov-critical: ## Enforce 100% coverage on critical paths (transform/decision/det
 	  --cov=parcus.memory.compaction --cov=parcus.memory.provider --cov=parcus.tenant \
 	  --cov=parcus.quota --cov=parcus.cache.similarity --cov=parcus.cache.encryption \
 	  --cov-branch --cov-fail-under=100 --cov-report=term-missing
+
+mutate: ## Mutation-test the critical modules (ephemeral via uvx; slow — nightly/on-demand)
+	$(MUTMUT) run
+	$(MUTMUT) results
 
 eval: ## Measure token savings + lossless equivalence over the built-in corpus
 	$(PY) -m parcus.cli eval

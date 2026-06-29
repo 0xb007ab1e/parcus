@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from parcus.quota import RateLimit, RateLimiter
 
 
@@ -71,3 +73,17 @@ def test_zero_refill_retry_after_is_safe() -> None:
     denied = limiter.check("t")
     assert denied.allowed is False
     assert denied.retry_after == 0.0
+
+
+def test_retry_after_reflects_partial_bucket_and_refill_rate() -> None:
+    # Pin the exact retry_after math: (1.0 - tokens) / refill_per_sec. A *partial* bucket with a
+    # *non-unit* refill rate is the only case that distinguishes it from its near-variants — the
+    # other tests only reach tokens=0 at refill=1.0, where `1-t` vs `1+t` and `/r` vs `*r`
+    # coincide. (Surfaced by mutation testing: two retry_after mutants survived without this.)
+    clock = _FakeClock()
+    limiter = RateLimiter(RateLimit(capacity=1, refill_per_sec=2.0), time_source=clock)
+    assert limiter.check("t").allowed is True  # consume the one token -> tokens 0.0
+    clock.advance(0.25)  # refill 0.25 s * 2.0/s = 0.5 token -> tokens 0.5 (< 1 -> denied)
+    denied = limiter.check("t")
+    assert denied.allowed is False
+    assert denied.retry_after == pytest.approx(0.25)  # (1.0 - 0.5) / 2.0
