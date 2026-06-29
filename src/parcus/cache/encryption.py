@@ -18,6 +18,10 @@ Design (master §5, ``topic-cryptography``):
   corruption) is treated as a **miss** (forward upstream), never an error or garbage served.
   The key itself comes from a secret store/env at the composition root, never from code/VCS
   (``workflow-secrets``); enabling encryption without a valid key fails **closed** at startup.
+* **KMS-backed master (envelope encryption)** — instead of holding the master key directly, store
+  only its KMS-*wrapped* form and inject a :class:`KeyManagementService` adapter; the
+  :class:`KmsCipherProvider` unwraps it via the KMS once and derives per-tenant DEKs from it, so
+  the root key never leaves the KMS. No cloud SDK is a dependency — the adapter is the operator's.
 """
 
 from __future__ import annotations
@@ -37,6 +41,8 @@ __all__ = [
     "CacheCipher",
     "CipherProvider",
     "EncryptedCache",
+    "KeyManagementService",
+    "KmsCipherProvider",
     "StaticCipherProvider",
     "TenantCipherProvider",
 ]
@@ -176,6 +182,73 @@ class TenantCipherProvider:
             )
             self._cache[tenant] = cipher
         return cipher
+
+
+@runtime_checkable
+class KeyManagementService(Protocol):
+    """A KMS/HSM that unwraps a wrapped key blob to its plaintext key material.
+
+    The root (wrapping) key never leaves the KMS: parcus stores only the *wrapped* master in
+    config (ciphertext — safe to commit) and holds the unwrapped master in memory only
+    transiently. The concrete adapter (AWS KMS ``Decrypt``, GCP KMS, Vault transit, an HSM) is
+    injected at the composition root — no cloud SDK is a dependency of parcus
+    (``topic-architecture-patterns``, ``workflow-secrets``).
+    """
+
+    def decrypt_key(self, wrapped_key: bytes) -> bytes:
+        """Return the plaintext key material for a KMS-wrapped key blob."""
+        ...
+
+
+class KmsCipherProvider:
+    """A :class:`CipherProvider` whose master key is unwrapped by a KMS (envelope encryption).
+
+    The 32-byte master never appears in env/config — only its KMS-wrapped form does. On first use
+    the wrapped master is decrypted via the injected KMS (once, then the result is cached in
+    memory) and per-tenant DEKs are derived from it exactly as :class:`TenantCipherProvider` does,
+    so KMS sourcing **composes** with per-tenant keys, crypto-shredding, and rotation
+    (``previous_wrapped_master_keys`` unwrap the retired masters for decrypt-only overlap).
+
+    A KMS failure is **not** swallowed here — it propagates so a misconfiguration is loud rather
+    than silently disabling caching; the engine's cache calls fail open around it, so the request
+    is still served (just uncached). Enabling encryption without a working KMS therefore fails
+    closed for *caching* while staying open for *availability* (``topic-error-handling``).
+
+    Args:
+        kms: The injected KMS adapter that unwraps the master key(s).
+        wrapped_master_key: The KMS-wrapped current master key (ciphertext; safe to store).
+        previous_wrapped_master_keys: Retired wrapped masters (decrypt-only) for rotation overlap.
+        shredded: Tenant ids whose key is withheld (crypto-shredding).
+    """
+
+    def __init__(
+        self,
+        kms: KeyManagementService,
+        wrapped_master_key: bytes,
+        *,
+        previous_wrapped_master_keys: tuple[bytes, ...] = (),
+        shredded: frozenset[str] = frozenset(),
+    ) -> None:
+        """Hold the KMS adapter and wrapped key(s); the master is unwrapped lazily on first use."""
+        self._kms = kms
+        self._wrapped = wrapped_master_key
+        self._previous_wrapped = previous_wrapped_master_keys
+        self._shredded = shredded
+        self._delegate: TenantCipherProvider | None = None
+
+    def _resolve(self) -> TenantCipherProvider:
+        """Unwrap the master via the KMS once and build the delegate provider (cached)."""
+        if self._delegate is None:
+            master = self._kms.decrypt_key(self._wrapped)
+            previous = tuple(self._kms.decrypt_key(w) for w in self._previous_wrapped)
+            self._delegate = TenantCipherProvider(
+                master, previous_master_keys=previous, shredded=self._shredded
+            )
+        return self._delegate
+
+    def for_tenant(self, tenant: str) -> CacheCipher | None:
+        """Return ``tenant``'s cipher from the KMS-sourced master, or ``None`` if shredded."""
+        return self._resolve().for_tenant(tenant)
 
 
 class EncryptedCache:
