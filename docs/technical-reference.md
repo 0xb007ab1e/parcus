@@ -300,15 +300,31 @@ and validated at startup (fail fast). Defaults shown.
 ## 10. Correctness model
 
 - **Fail-open matrix.** Unroutable → 502; unparseable/unknown dialect → pass through; compressor
-  error → original bytes; memory/similarity/cache error → behave as miss/no-op; cache store error
-  → no-op. Security: missing-tenant on a configured allow-list → 401; over rate limit → 429;
-  encryption enabled without a key → refuse to start.
+  error → original bytes; tokenizer error → token metrics drop to 0 (request unaffected);
+  memory/similarity/cache error → behave as miss/no-op; cache store error → no-op. Security:
+  redactor error → request still forwarded but **not cached** (fails closed for confidentiality);
+  missing-tenant on a configured allow-list → 401; over rate limit → 429; encryption enabled
+  without a key → refuse to start.
+- **Defense in depth at every seam.** The engine does not merely *trust* the port contracts —
+  it guards each trusted-adapter call (tokenizer, redactor, cache get/put, similarity
+  lookup/remember) so that even a *contract-violating* adapter that raises degrades to
+  "skip the optimization, forward the request" rather than crashing. This is the prime
+  directive made robust, not just documented.
+- **Invariants** (`invariants.py`) are the model-free proofs that make Tier-0/Tier-1 safe without
+  a model; Tier-2 and the similarity cache rely on offline quality/precision gates instead.
+- **Test layers.**
+  - *Example-based* unit/integration tests (`tests/unit`, `tests/integration`).
+  - *Property-based* invariant tests (`tests/property`, Hypothesis): for every synthesised
+    request, each tier never expands tokens, preserves immutable spans byte-for-byte and request
+    structure, satisfies its model-free invariant (lossless = whitespace-only; filler = only
+    allow-listed tokens), and is deterministic + idempotent.
+  - *Fault-injection* fail-open tests (`tests/integration/test_fail_open.py`): an adapter that
+    raises at each seam is asserted to still yield the real upstream response — encoding the
+    fail-open matrix above as executable regression tests.
 - **Critical-path 100% coverage gate** (CI): `compress`, `model`, `spans`, `cache.key`,
   `cache.policy`, `cache.similarity`, `cache.encryption`, `redact`, `invariants`,
   `eval.equivalence`, `eval.quality`, `memory.compaction`, `memory.provider`, `tenant`, `quota`.
   Repo-wide gate ≥90% line+branch.
-- **Invariants** (`invariants.py`) are the model-free proofs that make Tier-0/Tier-1 safe without
-  a model; Tier-2 and the similarity cache rely on offline quality/precision gates instead.
 
 ---
 
