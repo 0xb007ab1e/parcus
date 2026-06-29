@@ -32,3 +32,23 @@ means schemathesis found a server error — i.e. a fail-open gap to fix.
 `schemathesis` is invoked as an external/ephemeral tool — nothing added to `pyproject.toml`. Not
 wired into CI by default (it stands up a live server); run on demand or as a scheduled job, and
 pin the schemathesis version there. Extend `openapi.yaml` as the accepted edge surface grows.
+
+## Coverage-guided parser fuzzing (Atheris)
+
+Where schemathesis fuzzes the proxy **black-box over HTTP**, `fuzz_parsers.py` fuzzes the parser
+**functions directly** with [Atheris](https://github.com/google/atheris) (libFuzzer) — coverage-
+guided, so it reaches edge cases black-box traffic rarely hits. It feeds mutated input to
+`dialects.detect` / `dialects.parse`, `app._is_stream`, `tenant.derive_tenant`, and
+`Redactor.has_secret`, letting any exception propagate so libFuzzer records it as a crash. These
+must **fail open** (the engine calls `parse()` un-guarded, so a parser exception would become a
+5xx).
+
+```bash
+.venv/bin/python -m pip install atheris    # not a project dependency; needs clang
+qa/fuzz/run_atheris.sh                      # 30s campaign
+MAX_TOTAL_TIME=300 qa/fuzz/run_atheris.sh   # longer
+```
+
+A `crash-*` file appearing here (gitignored) is a fail-open gap: the byte string in it made a
+parser raise — reproduce with `python qa/fuzz/fuzz_parsers.py qa/fuzz/crash-<hash>`. Last run:
+~978k inputs in ~26 s, 0 crashes.
