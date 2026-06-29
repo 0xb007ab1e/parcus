@@ -1,0 +1,4 @@
+# Local k6 binary (install separately; not vendored) and run artifacts.
+k6
+*.json
+summary.*
