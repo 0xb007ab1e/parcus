@@ -10,10 +10,12 @@ from parcus.cache import SqliteCache
 from parcus.cache.encryption import (
     CacheCipher,
     EncryptedCache,
+    EpochCipherProvider,
     KmsCipherProvider,
     StaticCipherProvider,
     TenantCipherProvider,
 )
+from parcus.cache.epoch import InMemoryEpochStore
 from parcus.model import CachedResponse
 
 _KEY = b"\x00" * 32
@@ -318,3 +320,66 @@ class TestKmsCipherProvider:
         stored = inner.get("k", tenant="t")
         assert stored is not None and b"kms-protected" not in stored.body  # ciphertext at rest
         assert enc.get("k", tenant="t").body == b"kms-protected"  # type: ignore[union-attr]
+
+
+class TestEpochCipherProvider:
+    def test_round_trips_at_initial_epoch(self) -> None:
+        provider = EpochCipherProvider(_KEY, InMemoryEpochStore())
+        cipher = provider.for_tenant("t")
+        assert cipher is not None
+        blob = cipher.seal("k", b"secret")
+        assert cipher.open("k", blob) == b"secret"
+
+    def test_caches_cipher_within_an_epoch(self) -> None:
+        provider = EpochCipherProvider(_KEY, InMemoryEpochStore())
+        assert provider.for_tenant("t") is provider.for_tenant("t")  # same object until bumped
+
+    def test_bump_makes_prior_ciphertext_unreadable(self) -> None:
+        store = InMemoryEpochStore()
+        provider = EpochCipherProvider(_KEY, store)
+        before = provider.for_tenant("t")
+        assert before is not None
+        blob = before.seal("k", b"pre-shred")
+        store.bump("t")  # shred
+        after = provider.for_tenant("t")
+        assert after is not None and after is not before  # a fresh DEK at the new epoch
+        assert after.open("k", blob) is None  # the old entry can never be opened again
+
+    def test_shred_is_irreversible_across_a_fresh_provider(self) -> None:
+        # A persisted bump means a brand-new provider (a "restart") reading the same store derives
+        # the new epoch's DEK — there is no way back to the old key.
+        store = InMemoryEpochStore()
+        blob = EpochCipherProvider(_KEY, store).for_tenant("t").seal("k", b"old")  # type: ignore[union-attr]
+        store.bump("t")
+        restarted = EpochCipherProvider(_KEY, store).for_tenant("t")
+        assert restarted is not None and restarted.open("k", blob) is None
+
+    def test_tenants_have_independent_epochs(self) -> None:
+        store = InMemoryEpochStore()
+        provider = EpochCipherProvider(_KEY, store)
+        blob_a = provider.for_tenant("a").seal("k", b"a-data")  # type: ignore[union-attr]
+        store.bump("a")  # shred only tenant a
+        assert provider.for_tenant("a").open("k", blob_a) is None  # type: ignore[union-attr]
+        # tenant b, untouched, still round-trips
+        blob_b = provider.for_tenant("b").seal("k", b"b-data")  # type: ignore[union-attr]
+        assert provider.for_tenant("b").open("k", blob_b) == b"b-data"  # type: ignore[union-attr]
+
+    def test_rotation_opens_entries_at_the_current_epoch(self) -> None:
+        store = InMemoryEpochStore()
+        old = EpochCipherProvider(_KEY2, store).for_tenant("t")  # sealed under the old master
+        assert old is not None
+        blob = old.seal("k", b"rotate-me")
+        rotated = EpochCipherProvider(_KEY, store, previous_master_keys=(_KEY2,)).for_tenant("t")
+        assert rotated is not None and rotated.open("k", blob) == b"rotate-me"
+
+    def test_rejects_wrong_key_length(self) -> None:
+        with pytest.raises(ValueError, match="32 bytes"):
+            EpochCipherProvider(b"short", InMemoryEpochStore())
+
+    def test_end_to_end_shred_through_encrypted_cache(self) -> None:
+        store = InMemoryEpochStore()
+        enc = EncryptedCache(SqliteCache(), provider=EpochCipherProvider(_KEY, store))
+        enc.put("k", _resp(b"tenant-data"), 60, tenant="t")
+        assert enc.get("k", tenant="t").body == b"tenant-data"  # type: ignore[union-attr]
+        store.bump("t")  # shred
+        assert enc.get("k", tenant="t") is None  # pre-shred entry is now inaccessible

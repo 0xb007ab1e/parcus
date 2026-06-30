@@ -6,6 +6,10 @@ All notable changes to parcus are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- **Monotonic per-tenant key epoch (irreversible crypto-shredding).** An `EpochStore` (in-memory +
+  persistent SQLite) + `EpochCipherProvider` fold a per-tenant epoch into the DEK derivation; a
+  shred is a `bump` that only ever increases and persists, so it has no un-shred path and survives
+  restart — closing the ADR 0007 caveat. See ADR 0009.
 - **KMS-backed master key for at-rest encryption (envelope encryption).** A `KeyManagementService`
   port + `KmsCipherProvider` let the cache's master key be stored only in KMS-*wrapped* form and
   unwrapped on demand by an injected KMS/HSM adapter (the root key never leaves the KMS). Composes

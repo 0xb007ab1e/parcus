@@ -322,7 +322,7 @@ and validated at startup (fail fast). Defaults shown.
     raises at each seam is asserted to still yield the real upstream response — encoding the
     fail-open matrix above as executable regression tests.
 - **Critical-path 100% coverage gate** (CI): `compress`, `model`, `spans`, `cache.key`,
-  `cache.policy`, `cache.similarity`, `cache.encryption`, `redact`, `invariants`,
+  `cache.policy`, `cache.similarity`, `cache.encryption`, `cache.epoch`, `redact`, `invariants`,
   `eval.equivalence`, `eval.quality`, `memory.compaction`, `memory.provider`, `tenant`, `quota`.
   Repo-wide gate ≥90% line+branch.
 
