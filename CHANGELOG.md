@@ -5,36 +5,46 @@ All notable changes to parcus are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-30
+
+Hardening, two opt-in at-rest-encryption features, the lossy-tier correctness gate, and a large
+investment in test depth. All changes are backward-compatible and off by default except where
+noted; single-user local behaviour is unchanged.
+
 ### Added
+- **KMS-backed master key for at-rest encryption (envelope encryption).** A `KeyManagementService`
+  port + `KmsCipherProvider` let the cache's master key be stored only in KMS-*wrapped* form and
+  unwrapped on demand by an injected KMS/HSM adapter (the root key never leaves the KMS). Composes
+  with per-tenant DEKs, crypto-shredding, and rotation; no cloud SDK is a dependency (the adapter
+  is operator-supplied). See ADR 0008.
+- **Monotonic per-tenant key epoch (irreversible crypto-shredding).** An `EpochStore` (in-memory +
+  persistent SQLite) + `EpochCipherProvider` fold a per-tenant epoch into the DEK derivation; a
+  shred is a `bump` that only ever increases and persists, so it has no un-shred path and survives
+  restart — closing the ADR 0007 caveat. See ADR 0009.
 - **Answer-preservation gate for the lossy tiers (`parcus eval --learned` / `--judged`).** A new
   `eval.judged` harness + `BUILTIN_JUDGED_SAMPLES` judge whether a compressed prompt still
   preserves the required content. `--learned` gates the Tier-2 learned compressor (skips CI-safe
   when the local model is absent; its gate logic is covered in CI via a fake reducer); `--judged
   [--filler --aggressive]` validates a filler set the same way, model-free. Delivers the offline
   gate ADR 0006 deferred.
-- **Monotonic per-tenant key epoch (irreversible crypto-shredding).** An `EpochStore` (in-memory +
-  persistent SQLite) + `EpochCipherProvider` fold a per-tenant epoch into the DEK derivation; a
-  shred is a `bump` that only ever increases and persists, so it has no un-shred path and survives
-  restart — closing the ADR 0007 caveat. See ADR 0009.
-- **KMS-backed master key for at-rest encryption (envelope encryption).** A `KeyManagementService`
-  port + `KmsCipherProvider` let the cache's master key be stored only in KMS-*wrapped* form and
-  unwrapped on demand by an injected KMS/HSM adapter (the root key never leaves the KMS). Composes
-  with per-tenant DEKs, crypto-shredding, and rotation; no cloud SDK is a dependency (the adapter
-  is operator-supplied). See ADR 0008.
-- **Property-based invariant tests** (`tests/property/`, Hypothesis): the compression invariants
-  (never-expands, immutable spans byte-for-byte, structure preserved, lossless = whitespace-only,
-  filler = only allow-listed tokens, deterministic + idempotent) are now checked against
-  thousands of synthesised requests, not just hand-written cases.
-- **Fault-injection fail-open tests** (`tests/integration/test_fail_open.py`): an adapter that
-  raises at each seam (tokenizer, redactor, cache get/put, similarity lookup/remember, memory
-  ingest, compressor) is asserted to still serve the genuine upstream response.
+- **Expanded test depth.** Property-based compression-invariant tests (Hypothesis); fault-injection
+  fail-open tests at every adapter seam; SSE streaming-fidelity (byte-exact / incremental /
+  backpressure); concurrency/race tests (rate-limiter over-admission, cache thread-safety,
+  cross-tenant under load); credential-safety (the provider key never reaches metrics/headers/cache).
+- **Dependency-free QA harnesses** under `qa/` (external/ephemeral tools — nothing added to
+  `pyproject`): mutation testing (`make mutate`, mutmut), k6 load/soak, schemathesis HTTP-edge fuzz,
+  Atheris parser fuzzing, OWASP ZAP DAST, and a promptfoo real-model lossy-tier eval.
 
 ### Changed
-- **Fail-open hardened (defense in depth).** The engine now guards every trusted-adapter seam,
-  so a *contract-violating* adapter that raises degrades to "skip the optimization, forward the
-  request" instead of crashing it. A redactor error fails **closed** for caching (the request is
-  forwarded but not cached); a tokenizer error drops token metrics to 0 without affecting the
-  request.
+- **Fail-open hardened (defense in depth).** The engine now guards every trusted-adapter seam, so a
+  *contract-violating* adapter that raises degrades to "skip the optimization, forward the request"
+  instead of crashing it. A redactor error fails **closed** for caching (forwarded, not cached); a
+  tokenizer error drops token metrics to 0 without affecting the request.
+- CI actions bumped from the deprecated Node20 runtime to **Node24**, still pinned by commit SHA.
+
+### Fixed
+- SQLite-backed stores close their connection on GC (a finalizer backstop), eliminating the
+  `ResourceWarning: unclosed database` noise in the test suite (96 → 0).
 
 ## [0.1.0] - 2026-06-25
 
@@ -68,4 +78,5 @@ cache; single-user local behaviour is the default and security controls fail clo
 - Provider API keys are never logged, cached, or persisted; cache/graph data redacted before
   persist; binds loopback/tailnet only (never public). Threat model in `docs/security/`.
 
+[0.2.0]: https://github.com/0xb007ab1e/parcus/releases/tag/v0.2.0
 [0.1.0]: https://github.com/0xb007ab1e/parcus/releases/tag/v0.1.0
