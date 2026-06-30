@@ -34,6 +34,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
+from parcus.cache.epoch import EpochStore
 from parcus.model import CachedResponse
 from parcus.ports import CachePort
 
@@ -41,6 +42,7 @@ __all__ = [
     "CacheCipher",
     "CipherProvider",
     "EncryptedCache",
+    "EpochCipherProvider",
     "KeyManagementService",
     "KmsCipherProvider",
     "StaticCipherProvider",
@@ -249,6 +251,66 @@ class KmsCipherProvider:
     def for_tenant(self, tenant: str) -> CacheCipher | None:
         """Return ``tenant``'s cipher from the KMS-sourced master, or ``None`` if shredded."""
         return self._resolve().for_tenant(tenant)
+
+
+class EpochCipherProvider:
+    """Per-tenant DEKs keyed by a monotonic key **epoch** — irreversible crypto-shredding.
+
+    Like :class:`TenantCipherProvider`, but the HKDF ``info`` includes the tenant's current epoch
+    from an :class:`~parcus.cache.epoch.EpochStore`. To shred a tenant, ``bump`` its epoch in the
+    store: the provider then derives a **new** DEK and never again derives the old one, so the
+    tenant's pre-bump ciphertext is permanently inaccessible through it. Because the epoch only
+    increases and (with the SQLite store) persists, there is no un-shred path and it survives
+    restart — closing the ADR 0007 caveat that clearing a withheld-key set resurrects data.
+    Rotation composes: previous master keys derive the previous DEKs at the **current** epoch.
+
+    Args:
+        master_key: The 32-byte current master key.
+        store: The per-tenant epoch source (in-memory or persistent SQLite).
+        previous_master_keys: Retired master keys (decrypt-only) for rotation overlap.
+
+    Raises:
+        ValueError: If any key is not exactly 32 bytes.
+    """
+
+    def __init__(
+        self,
+        master_key: bytes,
+        store: EpochStore,
+        *,
+        previous_master_keys: tuple[bytes, ...] = (),
+    ) -> None:
+        """Validate the master keys; hold them, the epoch store, and a per-(tenant, epoch) cache."""
+        for candidate in (master_key, *previous_master_keys):
+            if len(candidate) != _KEY_LEN:
+                raise ValueError(f"cache encryption key must be {_KEY_LEN} bytes (AES-256)")
+        self._master = master_key
+        self._previous_masters = previous_master_keys
+        self._store = store
+        self._cache: dict[tuple[str, int], CacheCipher] = {}
+
+    @staticmethod
+    def _derive(master: bytes, tenant: str, epoch: int) -> bytes:
+        """Derive a tenant's 32-byte DEK at a given epoch (HKDF-SHA256; tenant+epoch as info)."""
+        hkdf = HKDF(
+            algorithm=SHA256(),
+            length=_KEY_LEN,
+            salt=None,
+            info=_HKDF_INFO_PREFIX + f"{tenant}:e{epoch}".encode(),
+        )
+        return hkdf.derive(master)
+
+    def for_tenant(self, tenant: str) -> CacheCipher | None:
+        """Return ``tenant``'s cipher for its current epoch (a new DEK after each shred/bump)."""
+        epoch = self._store.epoch(tenant)
+        cipher = self._cache.get((tenant, epoch))
+        if cipher is None:
+            cipher = CacheCipher(
+                self._derive(self._master, tenant, epoch),
+                previous_keys=tuple(self._derive(m, tenant, epoch) for m in self._previous_masters),
+            )
+            self._cache[(tenant, epoch)] = cipher
+        return cipher
 
 
 class EncryptedCache:
