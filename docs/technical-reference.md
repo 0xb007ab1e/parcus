@@ -282,8 +282,12 @@ and validated at startup (fail fast). Defaults shown.
 - **Reserved local endpoints** (answered by parcus, never forwarded): `GET /__parcus__/health`,
   `GET /__parcus__/stats` (JSON snapshot), `GET /__parcus__/metrics` (Prometheus).
 - **Response meta headers**: `x-parcus-cache` (hit/miss/similar/off/stream-bypass),
-  `x-parcus-dialect`, `x-parcus-memory`, `x-parcus-tokens-before/after/saved`. The tenant id is
-  **never** exposed in a header.
+  `x-parcus-dialect`, `x-parcus-memory`, `x-parcus-tokens-before/after/saved` (parcus's local
+  estimate of the *request*), and — on a forwarded non-streaming response — the provider's own
+  billed counts `x-parcus-upstream-input/output-tokens` plus its prompt-cache signal
+  `x-parcus-upstream-cache-read/write-tokens` (ground truth; `cache-read > 0` means the re-sent
+  prefix hit the provider's prompt cache — watch it to confirm compression didn't bust it). The
+  tenant id is **never** exposed in a header.
 - **Dialects** (`dialects.py`): Anthropic Messages (`/v1/messages`) and OpenAI Chat Completions
   (`/v1/chat/completions`), text-only subset; richer payloads pass through untouched.
 

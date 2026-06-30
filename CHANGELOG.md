@@ -5,6 +5,16 @@ All notable changes to parcus are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- **Provider-usage capture (ground-truth tokens + prompt-cache signal).** parcus now parses the
+  provider's `usage` from forwarded non-streaming responses (Anthropic + OpenAI) into a
+  `ProviderUsage` and surfaces it on `SavingsEvent.upstream_usage` and `x-parcus-upstream-*`
+  response headers — the billed input/output tokens plus `cache-read`/`cache-write` counts. This
+  turns "savings" from a local-tokenizer estimate into ground truth and makes the provider
+  prompt-cache interaction observable (did request compression preserve the cache hit or bust it
+  — PLAN research Q3). Read-only and fail-open; streaming-response usage is captured separately
+  with the streaming-request work.
+
 ## [0.2.0] - 2026-06-30
 
 Hardening, two opt-in at-rest-encryption features, the lossy-tier correctness gate, and a large

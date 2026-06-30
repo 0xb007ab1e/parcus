@@ -28,6 +28,7 @@ from parcus.obs import MetricsSink, NullSink, SavingsEvent, StageStat
 from parcus.ports import CachePort, CompressorPort, MemoryPort, RedactorPort, TokenizerPort
 from parcus.proxy.dialects import detect, parse, serialize
 from parcus.proxy.upstream import UpstreamPort, UpstreamRequest, UpstreamResponse
+from parcus.proxy.usage import parse_usage
 from parcus.quota import RateLimiter
 from parcus.tenant import derive_tenant, is_authorized
 from parcus.tokenize import default_tokenizer
@@ -156,6 +157,7 @@ class ProxyEngine:
                 duration_ms=(time.monotonic() - start) * 1000.0,
                 stages=tuple(meta.get("stages", ())),
                 tenant=str(meta.get("tenant", "")),
+                upstream_usage=meta.get("upstream_usage"),
             )
         )
         return result
@@ -242,6 +244,12 @@ class ProxyEngine:
                     self._similarity.remember(
                         text=canonical.text, key=cache_key, model=canonical.model, tenant=tenant
                     )
+        # Capture the provider's billed usage + prompt-cache counts from the forwarded response
+        # (ground truth + cache-interaction signal). Read-only and fail-open: never blocks.
+        if 200 <= response.status_code < 300:
+            usage = parse_usage(dialect, response.content)
+            if usage is not None:
+                meta["upstream_usage"] = usage
         return ProxyResult(
             status_code=response.status_code,
             headers=self._response_headers(response.headers),

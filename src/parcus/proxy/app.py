@@ -70,6 +70,15 @@ def _meta_headers(meta: dict[str, Any]) -> dict[str, str]:
         out["x-parcus-tokens-before"] = str(before)
         out["x-parcus-tokens-after"] = str(after)
         out["x-parcus-tokens-saved"] = str(max(0, before - after))
+    usage = meta.get("upstream_usage")
+    if usage is not None:
+        # Provider's billed counts + prompt-cache signal (content-free); cache-read > 0 means the
+        # re-sent prefix hit the provider's prompt cache — watch it to confirm compression didn't
+        # bust that cache (PLAN Q3).
+        out["x-parcus-upstream-input-tokens"] = str(usage.input_tokens)
+        out["x-parcus-upstream-output-tokens"] = str(usage.output_tokens)
+        out["x-parcus-upstream-cache-read-tokens"] = str(usage.cache_read_tokens)
+        out["x-parcus-upstream-cache-write-tokens"] = str(usage.cache_write_tokens)
     return out
 
 
