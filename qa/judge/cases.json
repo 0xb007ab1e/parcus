@@ -1,0 +1,242 @@
+[
+  {
+    "id": "refactor-validate::L1-filler",
+    "tier": "L1-filler",
+    "name": "refactor-validate",
+    "original": "Could you please just go ahead and refactor the `parse_config` function so that it basically validates the input is a dict, and honestly make sure it raises ValueError on a missing 'host' key, really keeping the existing return type unchanged.",
+    "compressed": "Could you go ahead and refactor the `parse_config` function so that it validates the input is a dict, and make sure it raises ValueError on a missing 'host' key, keeping the existing return type unchanged.",
+    "tokens_before": 61,
+    "tokens_after": 52,
+    "identical": false
+  },
+  {
+    "id": "refactor-validate::L2-aggressive",
+    "tier": "L2-aggressive",
+    "name": "refactor-validate",
+    "original": "Could you please just go ahead and refactor the `parse_config` function so that it basically validates the input is a dict, and honestly make sure it raises ValueError on a missing 'host' key, really keeping the existing return type unchanged.",
+    "compressed": "Could you go ahead and refactor the `parse_config` function so that it validates the input is a dict, and make sure it raises ValueError on a missing 'host' key, keeping the existing return type unchanged.",
+    "tokens_before": 61,
+    "tokens_after": 52,
+    "identical": false
+  },
+  {
+    "id": "refactor-validate::L3-learned",
+    "tier": "L3-learned",
+    "name": "refactor-validate",
+    "original": "Could you please just go ahead and refactor the `parse_config` function so that it basically validates the input is a dict, and honestly make sure it raises ValueError on a missing 'host' key, really keeping the existing return type unchanged.",
+    "compressed": "Could you go ahead and refactor the `parse_config` function so that it validates the input is a dict, and make sure it raises ValueError on a missing 'host' key, keeping the existing return type unchanged.",
+    "tokens_before": 61,
+    "tokens_after": 52,
+    "identical": false
+  },
+  {
+    "id": "scale-deploy::L1-filler",
+    "tier": "L1-filler",
+    "name": "scale-deploy",
+    "original": "I was just wondering if you could simply scale the deployment to 5 replicas and set the memory limit to 512Mi, and please really don't touch the CPU request at all.",
+    "compressed": "I was wondering if you could scale the deployment to 5 replicas and set the memory limit to 512Mi, and don't touch the CPU request at all.",
+    "tokens_before": 41,
+    "tokens_after": 35,
+    "identical": false
+  },
+  {
+    "id": "scale-deploy::L2-aggressive",
+    "tier": "L2-aggressive",
+    "name": "scale-deploy",
+    "original": "I was just wondering if you could simply scale the deployment to 5 replicas and set the memory limit to 512Mi, and please really don't touch the CPU request at all.",
+    "compressed": "I was wondering if you could scale the deployment to 5 replicas and set the memory limit to 512Mi, and don't touch the CPU request at all.",
+    "tokens_before": 41,
+    "tokens_after": 35,
+    "identical": false
+  },
+  {
+    "id": "scale-deploy::L3-learned",
+    "tier": "L3-learned",
+    "name": "scale-deploy",
+    "original": "I was just wondering if you could simply scale the deployment to 5 replicas and set the memory limit to 512Mi, and please really don't touch the CPU request at all.",
+    "compressed": "I was wondering if you could scale the deployment to 5 replicas and set the memory limit to 512Mi, and don't touch the CPU request at all.",
+    "tokens_before": 41,
+    "tokens_after": 35,
+    "identical": false
+  },
+  {
+    "id": "debug-flaky::L1-filler",
+    "tier": "L1-filler",
+    "name": "debug-flaky",
+    "original": "Honestly the test is just really flaky. Could you basically explain why `assert 2 == 3` would obviously fail, and clearly suggest a concrete fix? Please be concise.",
+    "compressed": "the test is flaky. Could you explain why `assert 2 == 3` would obviously fail, and clearly suggest a concrete fix? be concise.",
+    "tokens_before": 41,
+    "tokens_after": 32,
+    "identical": false
+  },
+  {
+    "id": "debug-flaky::L2-aggressive",
+    "tier": "L2-aggressive",
+    "name": "debug-flaky",
+    "original": "Honestly the test is just really flaky. Could you basically explain why `assert 2 == 3` would obviously fail, and clearly suggest a concrete fix? Please be concise.",
+    "compressed": "the test is flaky. Could you explain why `assert 2 == 3` would fail, and suggest a concrete fix? be concise.",
+    "tokens_before": 41,
+    "tokens_after": 27,
+    "identical": false
+  },
+  {
+    "id": "debug-flaky::L3-learned",
+    "tier": "L3-learned",
+    "name": "debug-flaky",
+    "original": "Honestly the test is just really flaky. Could you basically explain why `assert 2 == 3` would obviously fail, and clearly suggest a concrete fix? Please be concise.",
+    "compressed": "the test is flaky. Could you explain why `assert 2 == 3` would fail, and suggest a concrete fix? be concise.",
+    "tokens_before": 41,
+    "tokens_after": 27,
+    "identical": false
+  },
+  {
+    "id": "summarize-constraint::L1-filler",
+    "tier": "L1-filler",
+    "name": "summarize-constraint",
+    "original": "Please just summarize the meeting notes in exactly 3 bullet points, and honestly keep each bullet under 15 words — really don't add any preamble whatsoever.",
+    "compressed": "summarize the meeting notes in exactly 3 bullet points, and keep each bullet under 15 words — don't add any preamble whatsoever.",
+    "tokens_before": 39,
+    "tokens_after": 32,
+    "identical": false
+  },
+  {
+    "id": "summarize-constraint::L2-aggressive",
+    "tier": "L2-aggressive",
+    "name": "summarize-constraint",
+    "original": "Please just summarize the meeting notes in exactly 3 bullet points, and honestly keep each bullet under 15 words — really don't add any preamble whatsoever.",
+    "compressed": "summarize the meeting notes in exactly 3 bullet points, and keep each bullet under 15 words — don't add any preamble whatsoever.",
+    "tokens_before": 39,
+    "tokens_after": 32,
+    "identical": false
+  },
+  {
+    "id": "summarize-constraint::L3-learned",
+    "tier": "L3-learned",
+    "name": "summarize-constraint",
+    "original": "Please just summarize the meeting notes in exactly 3 bullet points, and honestly keep each bullet under 15 words — really don't add any preamble whatsoever.",
+    "compressed": "summarize the meeting notes in exactly 3 bullet points, and keep each bullet under 15 words — don't add any preamble whatsoever.",
+    "tokens_before": 39,
+    "tokens_after": 32,
+    "identical": false
+  },
+  {
+    "id": "api-instruction::L1-filler",
+    "tier": "L1-filler",
+    "name": "api-instruction",
+    "original": "Could you kindly write a GET endpoint at /v1/health that simply returns 200 with a JSON body of {\"status\": \"ok\"}, and please make absolutely sure it never touches the database at all.",
+    "compressed": "Could you write a GET endpoint at /v1/health that returns 200 with a JSON body of {\"status\": \"ok\"}, and make absolutely sure it never touches the database at all.",
+    "tokens_before": 46,
+    "tokens_after": 41,
+    "identical": false
+  },
+  {
+    "id": "api-instruction::L2-aggressive",
+    "tier": "L2-aggressive",
+    "name": "api-instruction",
+    "original": "Could you kindly write a GET endpoint at /v1/health that simply returns 200 with a JSON body of {\"status\": \"ok\"}, and please make absolutely sure it never touches the database at all.",
+    "compressed": "Could you write a GET endpoint at /v1/health that returns 200 with a JSON body of {\"status\": \"ok\"}, and make sure it never touches the database at all.",
+    "tokens_before": 46,
+    "tokens_after": 38,
+    "identical": false
+  },
+  {
+    "id": "api-instruction::L3-learned",
+    "tier": "L3-learned",
+    "name": "api-instruction",
+    "original": "Could you kindly write a GET endpoint at /v1/health that simply returns 200 with a JSON body of {\"status\": \"ok\"}, and please make absolutely sure it never touches the database at all.",
+    "compressed": "Could you write a GET endpoint at /v1/health that returns 200 with a JSON body of {\"status\": \"ok\"}, and make sure it never touches the database at all.",
+    "tokens_before": 46,
+    "tokens_after": 38,
+    "identical": false
+  },
+  {
+    "id": "ordered-steps::L1-filler",
+    "tier": "L1-filler",
+    "name": "ordered-steps",
+    "original": "I'd really appreciate it if you could just walk me through, step by step, how to rotate the signing key: first generate the new key, then add it alongside the old one, and only then revoke the old key — please keep that exact order.",
+    "compressed": "I'd appreciate it if you could walk me through, step by step, how to rotate the signing key: first generate the new key, then add it alongside the old one, and only then revoke the old key — keep that exact order.",
+    "tokens_before": 58,
+    "tokens_after": 54,
+    "identical": false
+  },
+  {
+    "id": "ordered-steps::L2-aggressive",
+    "tier": "L2-aggressive",
+    "name": "ordered-steps",
+    "original": "I'd really appreciate it if you could just walk me through, step by step, how to rotate the signing key: first generate the new key, then add it alongside the old one, and only then revoke the old key — please keep that exact order.",
+    "compressed": "I'd appreciate it if you could walk me through, step by step, how to rotate the signing key: first generate the new key, then add it alongside the old one, and only then revoke the old key — keep that exact order.",
+    "tokens_before": 58,
+    "tokens_after": 54,
+    "identical": false
+  },
+  {
+    "id": "ordered-steps::L3-learned",
+    "tier": "L3-learned",
+    "name": "ordered-steps",
+    "original": "I'd really appreciate it if you could just walk me through, step by step, how to rotate the signing key: first generate the new key, then add it alongside the old one, and only then revoke the old key — please keep that exact order.",
+    "compressed": "I'd appreciate it if you could walk me through, step by step, how to rotate the signing key: first generate the new key, then add it alongside the old one, and only then revoke the old key — keep that exact order.",
+    "tokens_before": 58,
+    "tokens_after": 54,
+    "identical": false
+  },
+  {
+    "id": "numbers-budget::L1-filler",
+    "tier": "L1-filler",
+    "name": "numbers-budget",
+    "original": "Please just confirm clearly that you'll set the timeout to 30 seconds, cap the budget at 500 dollars, and retry at most 3 times with exponential backoff — honestly don't change any of those numbers.",
+    "compressed": "confirm clearly that you'll set the timeout to 30 seconds, cap the budget at 500 dollars, and retry at most 3 times with exponential backoff — don't change any of those numbers.",
+    "tokens_before": 50,
+    "tokens_after": 45,
+    "identical": false
+  },
+  {
+    "id": "numbers-budget::L2-aggressive",
+    "tier": "L2-aggressive",
+    "name": "numbers-budget",
+    "original": "Please just confirm clearly that you'll set the timeout to 30 seconds, cap the budget at 500 dollars, and retry at most 3 times with exponential backoff — honestly don't change any of those numbers.",
+    "compressed": "confirm that you'll set the timeout to 30 seconds, cap the budget at 500 dollars, and retry at most 3 times with exponential backoff — don't change any of those numbers.",
+    "tokens_before": 50,
+    "tokens_after": 43,
+    "identical": false
+  },
+  {
+    "id": "numbers-budget::L3-learned",
+    "tier": "L3-learned",
+    "name": "numbers-budget",
+    "original": "Please just confirm clearly that you'll set the timeout to 30 seconds, cap the budget at 500 dollars, and retry at most 3 times with exponential backoff — honestly don't change any of those numbers.",
+    "compressed": "confirm that you'll set the timeout to 30 seconds, cap the budget at 500 dollars, and retry at most 3 times with exponential backoff — don't change any of those numbers.",
+    "tokens_before": 50,
+    "tokens_after": 43,
+    "identical": false
+  },
+  {
+    "id": "negation-careful::L1-filler",
+    "tier": "L1-filler",
+    "name": "negation-careful",
+    "original": "Could you basically review this PR, but please really make sure you do NOT approve it if there are any failing tests, and obviously do not merge it yourself under any circumstances.",
+    "compressed": "Could you review this PR, but make sure you do NOT approve it if there are any failing tests, and obviously do not merge it yourself under any circumstances.",
+    "tokens_before": 46,
+    "tokens_after": 40,
+    "identical": false
+  },
+  {
+    "id": "negation-careful::L2-aggressive",
+    "tier": "L2-aggressive",
+    "name": "negation-careful",
+    "original": "Could you basically review this PR, but please really make sure you do NOT approve it if there are any failing tests, and obviously do not merge it yourself under any circumstances.",
+    "compressed": "Could you review this PR, but make sure you do NOT approve it if there are any failing tests, and do not merge it yourself under any circumstances.",
+    "tokens_before": 46,
+    "tokens_after": 37,
+    "identical": false
+  },
+  {
+    "id": "negation-careful::L3-learned",
+    "tier": "L3-learned",
+    "name": "negation-careful",
+    "original": "Could you basically review this PR, but please really make sure you do NOT approve it if there are any failing tests, and obviously do not merge it yourself under any circumstances.",
+    "compressed": "Could you review this PR, but make sure you do NOT approve it if there are any failing tests, and do not merge it yourself under any circumstances.",
+    "tokens_before": 46,
+    "tokens_after": 37,
+    "identical": false
+  }
+]
