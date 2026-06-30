@@ -33,7 +33,7 @@ from parcus.quota import RateLimiter
 from parcus.tenant import derive_tenant, is_authorized
 from parcus.tokenize import default_tokenizer
 
-__all__ = ["EngineConfig", "ProxyEngine", "ProxyResult"]
+__all__ = ["EngineConfig", "ProxyEngine", "ProxyResult", "StreamPlan"]
 
 # Request headers we must not forward verbatim (recomputed by the client or unsafe to relay).
 # accept-encoding is dropped so responses come back identity-encoded and replay cleanly.
@@ -83,6 +83,23 @@ class ProxyResult:
     status_code: int
     headers: list[tuple[str, str]]
     content: bytes
+    meta: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class StreamPlan:
+    """A prepared streaming request: either an early buffered response, or forward instructions.
+
+    ``early`` is a non-``None`` :class:`ProxyResult` for a request that must not be forwarded
+    (unroutable 502, unauthorized 401, rate-limited 429) — return it as-is. Otherwise forward
+    ``out_body`` (the **compressed** request) to ``url`` with ``forward_headers`` and stream the
+    response back untouched; ``meta`` carries the ``x-parcus-*`` header values.
+    """
+
+    early: ProxyResult | None
+    url: str
+    out_body: bytes
+    forward_headers: tuple[tuple[str, str], ...]
     meta: dict[str, Any] = field(default_factory=dict)
 
 
@@ -137,6 +154,88 @@ class ProxyEngine:
         if "authorization" in lower:
             return self._config.openai_upstream
         return None
+
+    def prepare_stream(
+        self, dialect: Dialect, path: str, headers: list[tuple[str, str]], body: bytes
+    ) -> StreamPlan:
+        """Authorize, rate-limit, and **compress** a streaming request for forwarding.
+
+        Mirrors the front-half of :meth:`_handle` — routing, server-side tenant derivation + edge
+        authorization, rate limiting, then canonicalize → memory → compress — but **never consults
+        the response cache** (streaming responses are not cached). The caller forwards the returned
+        compressed ``out_body`` and streams the response back untouched, so a streaming request
+        still gets request-payload compression while its SSE response passes through byte-for-byte.
+        Closing the prior gap where streaming bypassed authorization and rate limiting entirely.
+        Fails open: an uncanonicalizable body forwards unchanged.
+        """
+        meta: dict[str, Any] = {"dialect": dialect.value, "cache": "stream-bypass"}
+        base = self.route(dialect, headers)
+        if base is None:
+            return StreamPlan(
+                early=ProxyResult(
+                    status_code=502,
+                    headers=[("content-type", "application/json")],
+                    content=b'{"error":"parcus: unable to route request to a provider"}',
+                    meta={**meta, "routed": False},
+                ),
+                url="",
+                out_body=body,
+                forward_headers=(),
+                meta=meta,
+            )
+        url = base.rstrip("/") + path
+        scoped = self._config.multi_tenant or bool(self._config.allowed_tenants)
+        tenant = derive_tenant(headers, salt=self._config.salt) if scoped else ""
+        if tenant:
+            meta["tenant"] = tenant
+        if not is_authorized(tenant, self._config.allowed_tenants):
+            return StreamPlan(
+                early=ProxyResult(
+                    status_code=401,
+                    headers=[("content-type", "application/json")],
+                    content=b'{"error":"parcus: tenant not authorized"}',
+                    meta={**meta, "auth": "denied"},
+                ),
+                url=url,
+                out_body=body,
+                forward_headers=(),
+                meta=meta,
+            )
+        if self._rate_limiter is not None:
+            decision = self._rate_limiter.check(tenant)
+            if not decision.allowed:
+                return StreamPlan(
+                    early=ProxyResult(
+                        status_code=429,
+                        headers=[
+                            ("content-type", "application/json"),
+                            ("retry-after", str(math.ceil(decision.retry_after))),
+                        ],
+                        content=b'{"error":"parcus: rate limit exceeded"}',
+                        meta={**meta, "rate": "limited"},
+                    ),
+                    url=url,
+                    out_body=body,
+                    forward_headers=(),
+                    meta=meta,
+                )
+        out_body = body
+        canonical = self._canonicalize(dialect, body)
+        if canonical is not None:
+            working, memory_action = self._apply_memory(canonical, tenant)
+            out_body, compressed, comp_stats = self._compress_request(working, body)
+            meta["tokens_before"] = self._safe_count(canonical.text, canonical.model)
+            meta["tokens_after"] = self._safe_count(compressed.text, compressed.model)
+            meta["memory"] = memory_action
+            compacted = working is not canonical
+            meta["stages"] = self._stage_stats(canonical, working, compacted, comp_stats)
+        return StreamPlan(
+            early=None,
+            url=url,
+            out_body=out_body,
+            forward_headers=self._forward_headers(headers),
+            meta=meta,
+        )
 
     async def handle(
         self, method: str, path: str, headers: list[tuple[str, str]], body: bytes

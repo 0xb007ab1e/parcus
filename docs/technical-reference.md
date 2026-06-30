@@ -278,7 +278,8 @@ and validated at startup (fail fast). Defaults shown.
 ## 8. HTTP surface
 
 - **Catch-all reverse proxy.** Any path is routed to the provider; non-streaming → engine,
-  streaming (`"stream": true`) → transparent passthrough.
+  streaming (`"stream": true`) → `prepare_stream` (authorize + rate-limit + **compress the request
+  body**), then forward and relay the SSE response untouched (not response-cached).
 - **Reserved local endpoints** (answered by parcus, never forwarded): `GET /__parcus__/health`,
   `GET /__parcus__/stats` (JSON snapshot), `GET /__parcus__/metrics` (Prometheus).
 - **Response meta headers**: `x-parcus-cache` (hit/miss/similar/off/stream-bypass),

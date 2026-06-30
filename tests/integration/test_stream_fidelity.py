@@ -15,13 +15,19 @@ wiring is covered in ``test_proxy_app.py``.)
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
 
 import httpx
 import pytest
 
+from parcus.cache import CachePolicy, NullCache
+from parcus.compress import LosslessCompressor
 from parcus.proxy.app import _is_stream, _stream_passthrough
+from parcus.proxy.engine import EngineConfig, ProxyEngine
+from parcus.proxy.upstream import UpstreamRequest, UpstreamResponse
+from parcus.redact import Redactor
 
 _SSE = [
     b"event: message_start\n\n",
@@ -80,30 +86,38 @@ class _FakeStreamClient:
         return self._response
 
 
-class _RouteEngine:
-    """A minimal engine exposing only ``route()`` (all the passthrough needs)."""
+class _NoUpstream:
+    """Upstream that must never be called — prepare_stream is request-side only (no upstream)."""
 
-    def __init__(self, base: str | None = "https://a.test") -> None:
-        self._base = base
+    async def send(self, request: UpstreamRequest) -> UpstreamResponse:
+        raise AssertionError("prepare_stream must not call the upstream")
 
-    def route(self, dialect: object, headers: list[tuple[str, str]]) -> str | None:
-        return self._base
+
+def _engine() -> ProxyEngine:
+    """A real engine for the request-side prepare_stream (the fake client does the streaming)."""
+    return ProxyEngine(
+        upstream=_NoUpstream(),
+        compressor=LosslessCompressor(),
+        cache=NullCache(),
+        redactor=Redactor(),
+        policy=CachePolicy(),
+        config=EngineConfig(anthropic_upstream="https://a.test", openai_upstream="https://o.test"),
+    )
 
 
 def _app_with(client: _FakeStreamClient) -> SimpleNamespace:
     return SimpleNamespace(state=SimpleNamespace(stream_client=client))
 
 
-async def _passthrough(client, engine, headers=None, body=b'{"stream":true}'):
-    return await _stream_passthrough(
-        _app_with(client), engine, "POST", "/v1/messages", headers or [("x-api-key", "k")], body
-    )
+async def _passthrough(client, headers=None, body=b'{"stream":true}', path="/v1/messages"):
+    hdrs = [("x-api-key", "k")] if headers is None else headers
+    return await _stream_passthrough(_app_with(client), _engine(), "POST", path, hdrs, body)
 
 
 class TestByteFidelity:
     async def test_relays_chunks_byte_exact_and_ordered(self) -> None:
         resp = _FakeStreamResponse(200, {"content-type": "text/event-stream"}, list(_SSE))
-        out = await _passthrough(_FakeStreamClient(resp), _RouteEngine())
+        out = await _passthrough(_FakeStreamClient(resp))
         assert out.status_code == 200
         received = [chunk async for chunk in out.body_iterator]
         assert received == _SSE  # same chunks, same order, NOT coalesced
@@ -111,7 +125,7 @@ class TestByteFidelity:
 
     async def test_empty_stream_relays_nothing(self) -> None:
         resp = _FakeStreamResponse(200, {"content-type": "text/event-stream"}, [])
-        out = await _passthrough(_FakeStreamClient(resp), _RouteEngine())
+        out = await _passthrough(_FakeStreamClient(resp))
         assert [chunk async for chunk in out.body_iterator] == []
 
 
@@ -121,7 +135,7 @@ class TestIncrementalDelivery:
         # returning); the passthrough must return the StreamingResponse promptly regardless.
         gates = [asyncio.Event() for _ in _SSE]
         resp = _FakeStreamResponse(200, {}, list(_SSE), gates=gates)
-        out = await asyncio.wait_for(_passthrough(_FakeStreamClient(resp), _RouteEngine()), 2.0)
+        out = await asyncio.wait_for(_passthrough(_FakeStreamClient(resp)), 2.0)
         for gate in gates:
             gate.set()
         received = [chunk async for chunk in out.body_iterator]
@@ -132,7 +146,7 @@ class TestIncrementalDelivery:
         # true incremental streaming with consumer-driven backpressure.
         gates = [asyncio.Event() for _ in _SSE]
         resp = _FakeStreamResponse(200, {}, list(_SSE), gates=gates)
-        out = await _passthrough(_FakeStreamClient(resp), _RouteEngine())
+        out = await _passthrough(_FakeStreamClient(resp))
         iterator = out.body_iterator.__aiter__()
         for index, expected in enumerate(_SSE):
             gates[index].set()
@@ -154,7 +168,7 @@ class TestHeadersAndLifecycle:
             },
             [b"data: x\n\n"],
         )
-        out = await _passthrough(_FakeStreamClient(resp), _RouteEngine())
+        out = await _passthrough(_FakeStreamClient(resp))
         present = {k.lower() for k in out.headers}
         assert out.status_code == 206
         assert "content-length" not in present
@@ -171,7 +185,7 @@ class TestHeadersAndLifecycle:
             ("accept-encoding", "gzip"),
             ("x-api-key", "k"),
         ]
-        await _passthrough(client, _RouteEngine(), headers=headers)
+        await _passthrough(client, headers=headers)
         assert client.request is not None
         forwarded = {k.lower() for k, _ in client.request.headers}
         assert "host" not in forwarded
@@ -181,7 +195,7 @@ class TestHeadersAndLifecycle:
 
     async def test_closes_upstream_when_done(self) -> None:
         resp = _FakeStreamResponse(200, {}, [b"x"])
-        out = await _passthrough(_FakeStreamClient(resp), _RouteEngine())
+        out = await _passthrough(_FakeStreamClient(resp))
         assert out.background is not None  # a close task is scheduled
         await out.background()  # Starlette runs this after sending; invoke it directly
         assert resp.closed is True
@@ -190,7 +204,7 @@ class TestHeadersAndLifecycle:
 class TestRoutingAndDetection:
     async def test_unroutable_stream_returns_502_without_calling_upstream(self) -> None:
         client = _FakeStreamClient(_FakeStreamResponse(200, {}, [b"x"]))
-        out = await _passthrough(client, _RouteEngine(base=None))
+        out = await _passthrough(client, path="/v1/models", headers=[])
         assert out.status_code == 502
         assert client.request is None  # no upstream request was ever built/sent
 
@@ -200,3 +214,72 @@ class TestRoutingAndDetection:
         assert _is_stream(b'{"model": "m"}') is False
         assert _is_stream(b"not json") is False
         assert _is_stream(b"[1, 2, 3]") is False  # valid JSON but not an object
+
+
+def _stream_body(content: str) -> bytes:
+    return json.dumps(
+        {"model": "m", "messages": [{"role": "user", "content": content}], "stream": True}
+    ).encode()
+
+
+class TestStreamingRequestCompression:
+    """The new behaviour (#1): the streaming *request* body is compressed before forwarding,
+    while the response still streams through untouched (covered above)."""
+
+    async def test_request_body_is_compressed_and_stream_flag_preserved(self) -> None:
+        client = _FakeStreamClient(_FakeStreamResponse(200, {}, [b"data: x\n\n"]))
+        out = await _passthrough(client, body=_stream_body("hi   \n\n\n\nthere"))
+        assert client.request is not None
+        forwarded = json.loads(client.request.content)
+        # lossless: trailing whitespace stripped, 3+ newlines collapsed to one blank line
+        assert forwarded["messages"][0]["content"] == "hi\n\nthere"
+        assert forwarded["stream"] is True  # still a streaming request
+        # request-compression now surfaces on the streamed response's headers
+        before = int(out.headers["x-parcus-tokens-before"])
+        after = int(out.headers["x-parcus-tokens-after"])
+        assert before >= after
+        assert out.headers["x-parcus-cache"] == "stream-bypass"
+
+
+class TestStreamingFrontHalf:
+    """Streaming requests now also get authorization + rate limiting (previously bypassed)."""
+
+    def _engine(self, **kw: object) -> ProxyEngine:
+        return ProxyEngine(
+            upstream=_NoUpstream(),
+            compressor=LosslessCompressor(),
+            cache=NullCache(),
+            redactor=Redactor(),
+            policy=CachePolicy(),
+            config=EngineConfig(
+                anthropic_upstream="https://a.test",
+                openai_upstream="https://o.test",
+                multi_tenant=bool(kw.get("multi_tenant", False)),
+                allowed_tenants=kw.get("allowed_tenants", frozenset()),  # type: ignore[arg-type]
+            ),
+            rate_limiter=kw.get("rate_limiter"),  # type: ignore[arg-type]
+        )
+
+    async def test_unlisted_tenant_gets_401_without_forwarding(self) -> None:
+        eng = self._engine(multi_tenant=True, allowed_tenants=frozenset({"not-this-one"}))
+        client = _FakeStreamClient(_FakeStreamResponse(200, {}, [b"x"]))
+        out = await _stream_passthrough(
+            _app_with(client), eng, "POST", "/v1/messages", [("x-api-key", "k")], _stream_body("hi")
+        )
+        assert out.status_code == 401
+        assert client.request is None  # never forwarded
+
+    async def test_over_rate_limit_gets_429_without_forwarding(self) -> None:
+        from parcus.quota import RateLimit, RateLimiter
+
+        limiter = RateLimiter(RateLimit(capacity=1, refill_per_sec=0.0), time_source=lambda: 0.0)
+        eng = self._engine(rate_limiter=limiter)
+        body = _stream_body("hi")
+        first = _FakeStreamClient(_FakeStreamResponse(200, {}, [b"x"]))
+        second = _FakeStreamClient(_FakeStreamResponse(200, {}, [b"x"]))
+        h = [("x-api-key", "k")]
+        r1 = await _stream_passthrough(_app_with(first), eng, "POST", "/v1/messages", h, body)
+        r2 = await _stream_passthrough(_app_with(second), eng, "POST", "/v1/messages", h, body)
+        assert r1.status_code == 200
+        assert r2.status_code == 429
+        assert second.request is None  # the shed request never reached an upstream

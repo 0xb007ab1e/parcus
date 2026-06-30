@@ -1,9 +1,10 @@
 """FastAPI ingress: a catch-all reverse proxy in front of the engine.
 
 Non-streaming requests go through :class:`~parcus.proxy.engine.ProxyEngine` (compress +
-cache + forward). Streaming requests are transparently passed through (no compression/cache in
-M1 — that is an M2 enhancement); they still route to the correct provider and stream the
-response back untouched. Everything fails open.
+cache + forward). Streaming requests have their **request body compressed** (and are authorized
++ rate-limited) via :meth:`ProxyEngine.prepare_stream`, then forwarded; the SSE **response** is
+relayed back byte-for-byte and unbuffered. They are not response-cached (streams aren't cached).
+Everything fails open.
 """
 
 from __future__ import annotations
@@ -22,9 +23,9 @@ from parcus import __version__
 from parcus.obs import render_prometheus
 from parcus.proxy.dialects import detect
 from parcus.proxy.engine import (
-    _DROP_REQUEST_HEADERS,
     _DROP_RESPONSE_HEADERS,
     ProxyEngine,
+    ProxyResult,
 )
 
 # Reserved local paths the proxy answers itself (never forwarded upstream).
@@ -82,6 +83,18 @@ def _meta_headers(meta: dict[str, Any]) -> dict[str, str]:
     return out
 
 
+def _result_to_response(result: ProxyResult) -> Response:
+    """Turn a buffered :class:`ProxyResult` into a Response with its ``x-parcus-*`` headers."""
+    response = Response(
+        content=result.content,
+        status_code=result.status_code,
+        headers=dict(result.headers),
+    )
+    for key, value in _meta_headers(result.meta).items():
+        response.headers[key] = value
+    return response
+
+
 async def _stream_passthrough(
     app: FastAPI,
     engine: ProxyEngine,
@@ -90,23 +103,25 @@ async def _stream_passthrough(
     headers: list[tuple[str, str]],
     body: bytes,
 ) -> Response:
-    """Transparently proxy a streaming request/response (no compression/cache in M1)."""
-    base = engine.route(detect(path), headers)
-    if base is None:
-        return JSONResponse(
-            status_code=502,
-            content={"error": "parcus: unable to route request to a provider"},
-        )
-    url = base.rstrip("/") + path
-    forward = [(k, v) for k, v in headers if k.lower() not in _DROP_REQUEST_HEADERS]
+    """Proxy a streaming request: forward the COMPRESSED request body, stream the response back.
+
+    The request payload is compressed (and authorized + rate-limited) via
+    :meth:`ProxyEngine.prepare_stream`; the SSE response is relayed byte-for-byte and unbuffered.
+    """
+    plan = engine.prepare_stream(detect(path), path, headers, body)
+    if plan.early is not None:
+        return _result_to_response(plan.early)
     client: httpx.AsyncClient = app.state.stream_client
     upstream = await client.send(
-        client.build_request(method, url, headers=forward, content=body), stream=True
+        client.build_request(
+            method, plan.url, headers=list(plan.forward_headers), content=plan.out_body
+        ),
+        stream=True,
     )
     response_headers = {
         k: v for k, v in upstream.headers.items() if k.lower() not in _DROP_RESPONSE_HEADERS
     }
-    response_headers["x-parcus-cache"] = "stream-bypass"
+    response_headers.update(_meta_headers(plan.meta))  # x-parcus-cache=stream-bypass + token counts
     return StreamingResponse(
         upstream.aiter_raw(),
         status_code=upstream.status_code,
@@ -166,13 +181,6 @@ def create_app(
                 request.app, engine, request.method, request.url.path, headers, body
             )
         result = await engine.handle(request.method, request.url.path, headers, body)
-        response = Response(
-            content=result.content,
-            status_code=result.status_code,
-            headers=dict(result.headers),
-        )
-        for key, value in _meta_headers(result.meta).items():
-            response.headers[key] = value
-        return response
+        return _result_to_response(result)
 
     return app
