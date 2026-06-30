@@ -116,3 +116,13 @@ class SqliteCache:
     def close(self) -> None:
         """Close the underlying database connection."""
         self._conn.close()
+
+    def __del__(self) -> None:
+        """Close the connection on GC — a backstop; deterministic cleanup is ``close()``.
+
+        Guards a leaked connection (and its noisy ResourceWarning) if an instance is GC'd
+        without an explicit close, e.g. a short-lived store created inline in a test.
+        """
+        conn = getattr(self, "_conn", None)
+        if conn is not None:
+            conn.close()

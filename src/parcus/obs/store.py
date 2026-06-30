@@ -160,6 +160,12 @@ class SqliteMetricsSink:
         """Close the underlying database connection."""
         self._conn.close()
 
+    def __del__(self) -> None:
+        """Close the connection on GC — a backstop; deterministic cleanup is ``close()``."""
+        conn = getattr(self, "_conn", None)
+        if conn is not None:
+            conn.close()
+
 
 def _as_int(ok: bool | None) -> int | None:
     return None if ok is None else int(ok)

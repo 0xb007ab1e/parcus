@@ -149,6 +149,7 @@ exclude_also = [
   "raise NotImplementedError",
   "@abstractmethod",
   "if __name__ == .__main__.:",
+  "def __del__",  # finalizer backstops; GC timing makes them non-deterministic to cover
 ]
 
 [tool.bandit]
