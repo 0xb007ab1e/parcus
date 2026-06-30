@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from parcus.model import ProviderUsage
+
 __all__ = ["SavingsEvent", "StageStat"]
 
 
@@ -68,6 +70,8 @@ class SavingsEvent:
         stages: Per-stage reduction + accuracy breakdown (memory, lossless, filler, …).
         tenant: Opaque, content-free tenant id for per-tenant attribution (empty in
             single-tenant mode). Never the raw credential — see :mod:`parcus.tenant`.
+        upstream_usage: The provider's own billed token usage + prompt-cache counts, parsed from
+            a forwarded response (``None`` on a parcus cache hit or when the provider reports none).
     """
 
     request_id: str
@@ -80,6 +84,7 @@ class SavingsEvent:
     duration_ms: float
     stages: tuple[StageStat, ...] = field(default_factory=tuple)
     tenant: str = ""
+    upstream_usage: ProviderUsage | None = None
 
     @property
     def tokens_saved(self) -> int:
@@ -109,4 +114,14 @@ class SavingsEvent:
             "duration_ms": round(self.duration_ms, 2),
             "tenant": self.tenant,
             "stages": [s.to_dict() for s in self.stages],
+            "upstream_usage": (
+                {
+                    "input_tokens": self.upstream_usage.input_tokens,
+                    "output_tokens": self.upstream_usage.output_tokens,
+                    "cache_read_tokens": self.upstream_usage.cache_read_tokens,
+                    "cache_write_tokens": self.upstream_usage.cache_write_tokens,
+                }
+                if self.upstream_usage is not None
+                else None
+            ),
         }

@@ -22,6 +22,7 @@ __all__ = [
     "CompressionStats",
     "Dialect",
     "Message",
+    "ProviderUsage",
     "RedactionReport",
     "Role",
     "Span",
@@ -162,6 +163,31 @@ class RedactionReport:
     def has_secrets(self) -> bool:
         """Whether any sensitive span was detected."""
         return self.total > 0
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderUsage:
+    """The provider's **own** reported token usage, parsed from a forwarded response.
+
+    This is ground truth — the billed counts — as opposed to parcus's local-tokenizer estimate
+    of the request. It also exposes the provider's **prompt-cache** behaviour, which is the
+    dominant cost lever for tool/history-heavy harnesses: ``cache_read_tokens`` are re-sent prefix
+    tokens the provider served from its cache (cheap), and ``cache_write_tokens`` were written to
+    it. Watching these confirms whether parcus's request compression *preserved* the provider's
+    cache hit (good) or *perturbed the cacheable prefix and busted it* (a net-negative regression
+    — PLAN research Q3). All counts default to 0 when the provider doesn't report them.
+
+    Args:
+        input_tokens: Billed input/prompt tokens.
+        output_tokens: Billed output/completion tokens.
+        cache_read_tokens: Input tokens served from the provider's prompt cache.
+        cache_write_tokens: Input tokens written to the provider's prompt cache.
+    """
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 @dataclass(frozen=True, slots=True)

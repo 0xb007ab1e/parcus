@@ -67,6 +67,7 @@ class TestSavingsEvent:
             "duration_ms",
             "tenant",
             "stages",
+            "upstream_usage",
         }
 
 
