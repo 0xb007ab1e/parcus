@@ -237,3 +237,20 @@ def test_tenant_id_missing_credential_fails(
     rc = cli.main(["tenant-id"])
     assert rc == 1
     assert "no credential" in capsys.readouterr().err
+
+
+def test_eval_judged_aggressive_filler_passes() -> None:
+    # Offline aggressive-filler validation: removing the AGGRESSIVE_FILLERS set preserves the
+    # built-in corpus's required content (model-free, CI-safe).
+    rc = cli.main(["eval", "--judged", "--filler", "--aggressive"])
+    assert rc == 0
+
+
+def test_eval_learned_skips_when_model_unavailable(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A nonexistent model makes the learned reducer probe fail -> CI-safe skip (exit 0).
+    monkeypatch.setenv("PARCUS_LEARNED_MODEL", "/nonexistent/model/path")
+    rc = cli.main(["eval", "--learned"])
+    assert rc == 0
+    assert "skipped" in capsys.readouterr().out.lower()

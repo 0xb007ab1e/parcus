@@ -47,5 +47,13 @@ invariant** that can prove the output preserves meaning. That changes how it mus
   rather than implying a guarantee it can't provide.
 - `parcus.compress.learned` is in the 100%-critical coverage gate; the model-dependent
   `LLMLinguaReducer.reduce` body is `# pragma: no cover` (exercised only with the extra + model).
-- Follow-ups: a built-in `eval --learned` flow once a small local judge is bundled/cached; an
-  LLMLingua-2 path; per-domain keep-ratio tuning.
+- Follow-ups: an LLMLingua-2 path; per-domain keep-ratio tuning.
+
+## Update (2026-06-30): the offline gate is now runnable
+
+The deferred answer-preservation gate is delivered: `parcus eval --learned` compresses the
+built-in corpus through the learned tier and judges that required content survives (default the
+deterministic `KeywordRecallJudge`; an `LLMJudge` can be wired for a stronger offline check). It
+**skips CI-safe** (exit 0) when the local model / `learned` extra is absent, while the gate logic
+itself is covered in CI via a fake reducer (`eval.judged`). The same harness validates an
+aggressive filler set via `parcus eval --judged --filler --aggressive`.

@@ -6,6 +6,12 @@ All notable changes to parcus are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- **Answer-preservation gate for the lossy tiers (`parcus eval --learned` / `--judged`).** A new
+  `eval.judged` harness + `BUILTIN_JUDGED_SAMPLES` judge whether a compressed prompt still
+  preserves the required content. `--learned` gates the Tier-2 learned compressor (skips CI-safe
+  when the local model is absent; its gate logic is covered in CI via a fake reducer); `--judged
+  [--filler --aggressive]` validates a filler set the same way, model-free. Delivers the offline
+  gate ADR 0006 deferred.
 - **Monotonic per-tenant key epoch (irreversible crypto-shredding).** An `EpochStore` (in-memory +
   persistent SQLite) + `EpochCipherProvider` fold a per-tenant epoch into the DEK derivation; a
   shred is a `bump` that only ever increases and persists, so it has no un-shred path and survives
