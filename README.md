@@ -176,11 +176,16 @@ Everything beyond Tier-0 + exact cache is opt-in; a safe progression is `FILLER`
 
 ## Status
 
-**v0.1.0** — the full tiered-compression pipeline, exact + semantic cache, graph memory,
-observability, hosted multi-tenancy, and at-rest encryption are all implemented and tested. CI
-enforces the security/quality gates (lint, strict typing, SAST, tests with 100%-critical-path /
-≥90% coverage, dependency audit, SBOM, secret scan, Markdown link check); releases are signed with
-SLSA build provenance.
+**v0.2.0** ([release notes](https://github.com/0xb007ab1e/parcus/releases/tag/v0.2.0)) — the full
+tiered-compression pipeline, exact + semantic cache, graph memory, observability, hosted
+multi-tenancy, and at-rest encryption are all implemented and tested. **0.2.0** adds a **KMS-backed
+master key** and **irreversible per-tenant crypto-shredding** for the at-rest cache, an
+**answer-preservation gate** for the lossy tiers (`parcus eval --learned`), fail-open hardening
+across every adapter seam, and a broad test-depth expansion (property / fault-injection /
+streaming / concurrency / credential-safety suites, plus dependency-free load/fuzz/DAST/mutation
+harnesses). All backward-compatible; new features are opt-in. CI enforces the security/quality
+gates (lint, strict typing, SAST, tests with 100%-critical-path / ≥90% coverage, dependency audit,
+SBOM, secret scan, Markdown link check); releases are signed with SLSA build provenance.
 
 ## Development
 
