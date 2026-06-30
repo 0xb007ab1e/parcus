@@ -6,6 +6,14 @@ All notable changes to parcus are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- **Streaming requests are now compressed.** A streaming request (`"stream": true`) previously
+  bypassed the engine entirely — no compression, and (a latent gap) no authorization or rate
+  limiting. `ProxyEngine.prepare_stream` now applies the full request-side pipeline (route →
+  server-side tenant + edge authz → rate limit → canonicalize → memory → compress) and forwards
+  the **compressed** body, while the SSE **response** still streams back byte-for-byte and
+  unbuffered. Streaming responses remain uncached. This is the change that lets parcus actually
+  save tokens in front of streaming harnesses like Claude Code; `x-parcus-tokens-*` headers now
+  appear on streamed responses too.
 - **Provider-usage capture (ground-truth tokens + prompt-cache signal).** parcus now parses the
   provider's `usage` from forwarded non-streaming responses (Anthropic + OpenAI) into a
   `ProviderUsage` and surfaces it on `SavingsEvent.upstream_usage` and `x-parcus-upstream-*`
