@@ -13,6 +13,12 @@ from parcus.eval.equivalence import (
     is_lossless_equivalent,
     lossless_violations,
 )
+from parcus.eval.judged import (
+    BUILTIN_JUDGED_SAMPLES,
+    JudgedReport,
+    JudgedSample,
+    evaluate_judged,
+)
 from parcus.eval.metrics import EvalReport, SampleResult
 from parcus.eval.quality import KeywordRecallJudge, LLMJudge, QualityJudge, QualityVerdict
 from parcus.eval.retrieval import (
@@ -31,10 +37,13 @@ from parcus.eval.similarity import (
 )
 
 __all__ = [
+    "BUILTIN_JUDGED_SAMPLES",
     "BUILTIN_RETRIEVAL_SAMPLES",
     "BUILTIN_SAMPLES",
     "BUILTIN_SIMILARITY_SAMPLES",
     "EvalReport",
+    "JudgedReport",
+    "JudgedSample",
     "KeywordRecallJudge",
     "LLMJudge",
     "QualityJudge",
@@ -46,6 +55,7 @@ __all__ = [
     "SimilarityReport",
     "SimilaritySample",
     "evaluate",
+    "evaluate_judged",
     "evaluate_retrieval",
     "evaluate_similarity",
     "filler_violations",

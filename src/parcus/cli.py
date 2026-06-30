@@ -30,10 +30,13 @@ from parcus.compress import (
 )
 from parcus.config import Settings
 from parcus.eval import (
+    BUILTIN_JUDGED_SAMPLES,
     BUILTIN_RETRIEVAL_SAMPLES,
     BUILTIN_SAMPLES,
     BUILTIN_SIMILARITY_SAMPLES,
+    KeywordRecallJudge,
     evaluate,
+    evaluate_judged,
     evaluate_retrieval,
     evaluate_similarity,
     is_filler_equivalent,
@@ -226,6 +229,18 @@ def _parser() -> argparse.ArgumentParser:
         help="With --filler, use the larger AGGRESSIVE_FILLERS set instead of the default.",
     )
     ev.add_argument(
+        "--judged",
+        action="store_true",
+        help="Gate the selected tier by answer-preservation (recall judge) over the built-in "
+        "corpus, not just the structural invariant — e.g. validate an aggressive filler set.",
+    )
+    ev.add_argument(
+        "--learned",
+        action="store_true",
+        help="Answer-preservation gate for the Tier-2 learned compressor; skips (CI-safe, exit 0) "
+        "when the local model / 'learned' extra is unavailable.",
+    )
+    ev.add_argument(
         "--retrieval",
         action="store_true",
         help="Run the memory retrieval-quality gate (recall) instead of compression eval.",
@@ -297,6 +312,10 @@ def main(argv: list[str] | None = None) -> int:
             if args.record:
                 _record_eval("similarity", sim_report.precision, sim_report.passed)
             return 0 if sim_report.passed else 1
+        if args.learned:
+            return _eval_learned(args.record)
+        if args.judged:
+            return _eval_judged(args.filler, args.aggressive, args.record)
         samples = load_jsonl(args.dataset) if args.dataset else BUILTIN_SAMPLES
         if args.filler:
             fillers = AGGRESSIVE_FILLERS if args.aggressive else DEFAULT_FILLERS
@@ -365,6 +384,53 @@ def _record_eval(kind: str, score: float, passed: bool) -> None:
         store.record_eval(kind, score, passed)
     finally:
         store.close()
+
+
+def _eval_judged(filler: bool, aggressive: bool, record: bool) -> int:
+    """Answer-preservation gate over the (lossless [+ filler]) tier — CI-safe, model-free.
+
+    Used to validate an aggressive filler set: confirm the compressed prompts still preserve the
+    built-in corpus's required content phrases.
+    """
+    fillers = AGGRESSIVE_FILLERS if aggressive else DEFAULT_FILLERS
+    passes: list[CompressorPort] = [LosslessCompressor()]
+    if filler:
+        passes.append(FillerCompressor(fillers=fillers))
+    report = evaluate_judged(BUILTIN_JUDGED_SAMPLES, ChainCompressor(passes), KeywordRecallJudge())
+    print(report.render())
+    if record:
+        kind = "judged-aggressive" if aggressive else "judged"
+        _record_eval(kind, report.mean_score, report.passed)
+    return 0 if report.passed else 1
+
+
+def _eval_learned(record: bool) -> int:
+    """Answer-preservation gate for the Tier-2 learned compressor.
+
+    Needs a local LLMLingua model; when it is unavailable (CI / no 'learned' extra) this skips
+    with exit 0 rather than failing the gate. The model path is exercised offline. The gate logic
+    itself (``evaluate_judged`` + the recall judge) is covered in CI via a fake reducer.
+    """
+    reducer = LLMLinguaReducer(model_name=os.environ.get("PARCUS_LEARNED_MODEL", "gpt2"))
+    try:
+        reducer.reduce("a short probe prompt", keep_ratio=0.5)
+    except Exception:
+        print("parcus eval --learned: skipped (local LLMLingua model unavailable)")
+        return 0
+    learned = ChainCompressor(  # pragma: no cover - only when a local model is present
+        [
+            LosslessCompressor(),
+            FillerCompressor(fillers=AGGRESSIVE_FILLERS),
+            LearnedCompressor(reducer, keep_ratio=0.5),
+        ]
+    )
+    report = evaluate_judged(  # pragma: no cover - needs model
+        BUILTIN_JUDGED_SAMPLES, learned, KeywordRecallJudge()
+    )
+    print(report.render())  # pragma: no cover
+    if record:  # pragma: no cover
+        _record_eval("learned", report.mean_score, report.passed)
+    return 0 if report.passed else 1  # pragma: no cover
 
 
 if __name__ == "__main__":
