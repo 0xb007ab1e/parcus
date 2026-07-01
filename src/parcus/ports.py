@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from parcus.model import (
+    CacheCapability,
     CachedResponse,
     CanonicalRequest,
     CompressionStats,
@@ -19,6 +20,7 @@ from parcus.model import (
 
 __all__ = [
     "CachePort",
+    "CacheStrategy",
     "ClockPort",
     "CompressorPort",
     "MemoryPort",
@@ -101,6 +103,43 @@ class CachePort(Protocol):
 
     def put(self, key: str, value: CachedResponse, ttl_seconds: int, *, tenant: str = "") -> None:
         """Store ``value`` under ``key`` with a time-to-live in seconds (``tenant`` as in get)."""
+        ...
+
+
+@runtime_checkable
+class CacheStrategy(Protocol):
+    """Provider-specific prompt-cache policy — a uniform port with one adapter per dialect.
+
+    Extracts the per-provider divergence in prompt caching (Anthropic ``cache_control`` vs
+    OpenAI automatic-prefix vs none) behind one interface so the provider-blind core adapts via
+    a ``Dialect``-keyed registry rather than a type generic over the provider. Implementations
+    are **pure and deterministic** (no I/O, no tokenizer) and never emit provider wire JSON —
+    that rendering belongs to the dialect serialiser (policy vs representation). See
+    ``docs/design/token-reduction-roadmap.md`` §2.1.
+    """
+
+    capability: CacheCapability
+
+    def cacheable_boundary(self, request: CanonicalRequest) -> int | None:
+        """Return the count of leading messages in the provider-cacheable, must-not-perturb prefix.
+
+        ``system`` and ``tools`` are implicitly part of that prefix whenever a value is returned.
+        Compression may then touch only ``messages[boundary:]`` (the volatile tail). ``None``
+        means there is no worthwhile cacheable prefix and the whole request may be compressed —
+        always the case for a non-caching provider. This feeds the M1a cache-preservation guard;
+        the engine additionally enforces :attr:`CacheCapability.min_prefix_tokens` (it owns the
+        tokenizer). Must be side-effect-free.
+        """
+        ...
+
+    def annotate(self, request: CanonicalRequest) -> CanonicalRequest:
+        """Return ``request`` with a cache breakpoint marked, or unchanged if injection is moot.
+
+        A no-op for ``NONE``/``AUTOMATIC_PREFIX`` providers (nothing to inject). For an
+        explicit-breakpoint provider this is the M1b injection hook; rendering the marker to
+        ``cache_control`` is the dialect serialiser's job. Fail-open: returning the request
+        unchanged is always safe.
+        """
         ...
 
 
