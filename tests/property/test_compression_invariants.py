@@ -191,10 +191,12 @@ class TestFillerInvariants:
 class TestCompressionNeverExpandsText:
     """No tier may ever produce more *text* than it received.
 
-    This is the guaranteed property. The BPE *token* count is almost always reduced too, but
-    is NOT provably monotonic — removing whitespace can, on rare inputs, re-merge the remainder
-    into one extra token — so the hard guarantee is at the character level. (A guard that also
-    makes token-count non-expansion a hard guarantee is a candidate follow-up.)
+    This is the guaranteed property at the *compressor* level. The BPE *token* count is almost
+    always reduced too, but is NOT provably monotonic — removing whitespace can, on rare inputs,
+    re-merge the remainder into one extra token — so the compressor's hard guarantee is at the
+    character level. The **engine** makes token non-expansion a hard guarantee at the request path
+    via its never-cost-more guard (``ProxyEngine._compress_request``): if compression tokenizes to
+    more tokens than its input, the original is forwarded instead.
     """
 
     @given(req=_REQUEST, fillers=_FILLER_SETS)
