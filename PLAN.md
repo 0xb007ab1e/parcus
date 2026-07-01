@@ -187,6 +187,8 @@ eval set). Secondary: outbound-call reduction (cache hit rate), added per-call l
    tool schemas + file context)?
 2. Which filler-removal rules save tokens without measurably changing agent behavior?
 3. Does provider-prompt-cache-aware ordering beat naive compression (don't break their cache)?
+   See the post-0.2.0 roadmap for the mechanism set + per-provider capability model:
+   `docs/design/token-reduction-roadmap.md`.
 4. For graph memory: retrieval-graph (B) vs compaction (C) — which saves more at equal quality,
    and do they compose?
 5. Safe boundary for embedding-similarity cache reuse in agentic (stateful) contexts — if any.
