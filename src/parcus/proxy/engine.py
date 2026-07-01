@@ -434,12 +434,25 @@ class ProxyEngine:
     def _compress_request(
         self, working: CanonicalRequest, original: bytes
     ) -> tuple[bytes, CanonicalRequest, tuple[CompressionStats, ...]]:
-        """Compress + re-serialise ``working`` to outbound bytes (fail open to the original)."""
+        """Compress + re-serialise ``working`` to outbound bytes (fail open to the original).
+
+        **Never-cost-more guard:** compression is guaranteed to shrink the *text* but not the
+        provider's *BPE token* count — on rare inputs, removing whitespace can re-merge into one
+        extra token. If the compressed request would tokenize to *more* tokens than its input, the
+        compression is discarded and ``working`` is forwarded unchanged, so parcus never bills more
+        than not compressing. (Applies to both the buffered and streaming paths.)
+        """
         try:
-            compressed, stats = self._compressor.compress(working)
             decoded = json.loads(original)
-            encoded = json.dumps(serialize(compressed, decoded), ensure_ascii=False).encode("utf-8")
-            return encoded, compressed, stats
+            compressed, stats = self._compressor.compress(working)
+            if self._safe_count(compressed.text, compressed.model) > self._safe_count(
+                working.text, working.model
+            ):
+                # Compression expanded the token count — discard it, forward `working` as-is.
+                reverted = json.dumps(serialize(working, decoded), ensure_ascii=False)
+                return reverted.encode("utf-8"), working, ()
+            encoded = json.dumps(serialize(compressed, decoded), ensure_ascii=False)
+            return encoded.encode("utf-8"), compressed, stats
         except Exception:
             # Fail open: forward the original body unchanged; report no token delta.
             return original, working, ()

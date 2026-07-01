@@ -69,10 +69,11 @@ are the provider's **billed** truth.
 
 ## Limitations / honest notes
 
-- **BPE token count is not provably monotonic:** compression is guaranteed to never expand the
-  *text* (chars), and near-always reduces tokens, but on rare inputs removing whitespace can
-  re-merge into one extra BPE token. A guard that forwards the original when compression doesn't
-  reduce tokens would make token non-expansion a hard guarantee (candidate follow-up).
+- **BPE token count is not provably monotonic at the compressor level:** compression always
+  shrinks the *text* (chars) and near-always the tokens, but on rare inputs removing whitespace
+  can re-merge into one extra BPE token. The engine's **never-cost-more guard** now makes token
+  non-expansion a hard guarantee on the request path: if compression tokenizes to more tokens
+  than its input, the original is forwarded — so parcus never bills more than not compressing.
 - **Provider prompt-cache (PLAN Q3) untested here:** Groq reports no `cache_read` tokens, so the
   "did compression bust the provider's prompt cache?" question is Anthropic-specific. The capture
   plumbing (`x-parcus-upstream-cache-read-tokens`) is in place and verified; it needs an Anthropic

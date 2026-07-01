@@ -305,7 +305,8 @@ and validated at startup (fail fast). Defaults shown.
 ## 10. Correctness model
 
 - **Fail-open matrix.** Unroutable → 502; unparseable/unknown dialect → pass through; compressor
-  error → original bytes; tokenizer error → token metrics drop to 0 (request unaffected);
+  error → original bytes; **compression that expands the token count → original forwarded**
+  (never-cost-more guard); tokenizer error → token metrics drop to 0 (request unaffected);
   memory/similarity/cache error → behave as miss/no-op; cache store error → no-op. Security:
   redactor error → request still forwarded but **not cached** (fails closed for confidentiality);
   missing-tenant on a configured allow-list → 401; over rate limit → 429; encryption enabled

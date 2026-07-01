@@ -5,6 +5,12 @@ All notable changes to parcus are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- **Never-cost-more guard.** The engine now discards a compression that would tokenize to *more*
+  tokens than its input and forwards the original instead — so parcus never bills more than not
+  compressing. Compression shrinks text always, but BPE token count is not provably monotonic;
+  this makes token non-expansion a hard guarantee on both the buffered and streaming paths.
+
 ### Changed
 - **Accurate token measurement via `tiktoken` (was a 4-chars/token heuristic).** `default_tokenizer`
   now uses a real BPE encoding when available (`TiktokenTokenizer`, exact for OpenAI-family models,

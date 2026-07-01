@@ -6,7 +6,7 @@ import json
 
 from parcus.cache import CachePolicy, SqliteCache
 from parcus.compress import LosslessCompressor
-from parcus.model import CanonicalRequest, CompressionStats
+from parcus.model import CanonicalRequest, CompressionStats, Message
 from parcus.proxy.engine import EngineConfig, ProxyEngine
 from parcus.proxy.upstream import UpstreamRequest, UpstreamResponse
 from parcus.redact import Redactor
@@ -35,6 +35,39 @@ class BoomCompressor:
         self, request: CanonicalRequest
     ) -> tuple[CanonicalRequest, tuple[CompressionStats, ...]]:
         raise RuntimeError("boom")
+
+
+class ExpandingCompressor:
+    """A (perverse) compressor that makes the request longer — exercises the never-cost-more guard.
+
+    Real compression only shrinks text, but BPE token count can rarely tick up; this fake forces
+    that condition deterministically so we can assert the engine discards it.
+    """
+
+    def compress(
+        self, request: CanonicalRequest
+    ) -> tuple[CanonicalRequest, tuple[CompressionStats, ...]]:
+        grown = tuple(
+            Message(
+                role=m.role,
+                spans=tuple(
+                    s.with_text(s.text + " extra padding words added to grow the token count")
+                    if s.mutable
+                    else s
+                    for s in m.spans
+                ),
+            )
+            for m in request.messages
+        )
+        expanded = CanonicalRequest(
+            dialect=request.dialect,
+            model=request.model,
+            messages=grown,
+            system=request.system,
+            stream=request.stream,
+            tools_json=request.tools_json,
+        )
+        return expanded, (CompressionStats(step="evil", tokens_before=1, tokens_after=99),)
 
 
 def _engine(upstream: FakeUpstream, **kw: object) -> ProxyEngine:
@@ -110,6 +143,17 @@ class TestForwardingAndCompression:
         body = _anthropic("data   \n\n\n\n")
         await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], body)
         assert up.last.content == body  # original forwarded despite the failure
+
+    async def test_never_cost_more_guard_discards_token_expanding_compression(self) -> None:
+        # If compression would produce MORE tokens than the input, forward the original unchanged.
+        up = FakeUpstream()
+        eng = _engine(up, compressor=ExpandingCompressor(), cache_enabled=False)
+        body = _anthropic("keep me exactly as sent")
+        result = await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], body)
+        sent = json.loads(up.last.content)
+        assert sent["messages"][0]["content"] == "keep me exactly as sent"  # not expanded
+        # meta reflects no expansion (compression discarded)
+        assert result.meta["tokens_after"] <= result.meta["tokens_before"]
 
 
 class TestCaching:
