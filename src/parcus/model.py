@@ -17,6 +17,8 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 __all__ = [
+    "CacheCapability",
+    "CacheModel",
     "CachedResponse",
     "CanonicalRequest",
     "CompressionStats",
@@ -44,6 +46,44 @@ class Dialect(StrEnum):
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
     UNKNOWN = "unknown"
+
+
+class CacheModel(StrEnum):
+    """How a provider caches re-sent request prefixes — drives the per-provider cache strategy.
+
+    * ``NONE`` — the provider does not cache prefixes (e.g. Groq). Nothing to preserve; the whole
+      request may be compressed.
+    * ``AUTOMATIC_PREFIX`` — the provider caches a stable prefix on its own with no client control
+      (e.g. OpenAI, DeepSeek). parcus can only *preserve* it (not perturb the cacheable prefix).
+    * ``EXPLICIT_BREAKPOINT`` — the provider caches at client-declared breakpoints (Anthropic
+      ``cache_control``). parcus can both *preserve* and *inject* a breakpoint.
+    """
+
+    NONE = "none"
+    AUTOMATIC_PREFIX = "automatic_prefix"
+    EXPLICIT_BREAKPOINT = "explicit_breakpoint"
+
+
+@dataclass(frozen=True, slots=True)
+class CacheCapability:
+    """A provider's prompt-cache capabilities, consulted by the engine when it wires in caching.
+
+    This is plain data (deliberately not a generic type parameterised on the provider): the
+    core stays provider-blind and each dialect's strategy carries its own descriptor. See
+    ``docs/design/token-reduction-roadmap.md`` §2.1.
+
+    Args:
+        model: The provider's caching model.
+        min_prefix_tokens: The smallest prefix the provider will cache (0 when not applicable).
+            For Anthropic this is the conservative floor across models (4096; Sonnet-4.6/Fable
+            cache from 2048) so an injected breakpoint is guaranteed to cache on any model.
+        max_breakpoints: The maximum number of explicit cache breakpoints per request (0 when
+            the provider takes no explicit breakpoints).
+    """
+
+    model: CacheModel
+    min_prefix_tokens: int = 0
+    max_breakpoints: int = 0
 
 
 @dataclass(frozen=True, slots=True)
