@@ -38,22 +38,78 @@ lever, so parcus needs a per-adapter capability descriptor rather than one hardc
 parcus already captures both shapes into `ProviderUsage` (`x-parcus-upstream-cache-read-tokens`
 / `-cache-write-tokens`), so the observability is in place; what's missing is *acting* on it.
 
-**Provider-capability abstraction.** Give each dialect adapter a `caching:` descriptor —
-`none | automatic_prefix | explicit_breakpoint` — and let the engine adapt:
+### 2.1 The `CacheStrategy` port (extract per-provider caching behind a uniform interface)
 
-- **`explicit_breakpoint` (Anthropic):** parcus can both **preserve** and **inject**
-  `cache_control`.
-- **`automatic_prefix` (OpenAI/DeepSeek):** parcus can only **preserve** — injection is moot
-  (the provider caches on its own); the job is to not perturb the stable prefix so the
-  automatic cache keeps hitting.
-- **`none` (Groq):** nothing to preserve; only request-shrinking applies.
+Provider caching is extracted behind a **single uniform port** with per-dialect adapters and a
+`Dialect`-keyed registry — the same dispatch shape `parse_usage` already uses. It lives
+alongside the existing `Protocol` ports in `src/parcus/ports.py`, injected at the composition
+root.
+
+**Not a generic `IProviderCache<T>` parameterized on the provider.** parcus's core is
+deliberately provider-*blind*: every dialect parses into one `CanonicalRequest` and every
+provider's usage into one `ProviderUsage`. A type generic over the provider (`T = Anthropic`)
+re-introduces the provider-specific type the canonicalization layer exists to erase — forcing
+the engine to be generic or leaking `T` into call sites, and rippling into signatures whenever
+a provider is added. DIP wants the core to depend on **one abstraction it owns, identical
+across providers**; interoperability is *maximized* by a non-generic port + registry, where a
+new provider is a new adapter + one capability row with **zero core changes**.
+
+```python
+# src/parcus/ports.py  (or cache/strategy.py)
+class CacheModel(StrEnum):
+    NONE = "none"                          # Groq — nothing to preserve
+    AUTOMATIC_PREFIX = "automatic_prefix"  # OpenAI, DeepSeek — preserve only
+    EXPLICIT_BREAKPOINT = "explicit_breakpoint"  # Anthropic — preserve + inject
+
+@dataclass(frozen=True)
+class CacheCapability:                 # data, not a generic — small per-provider params
+    model: CacheModel
+    min_prefix_tokens: int = 0         # 4096 Opus / 2048 Sonnet-4.6/Fable; 0 if N/A
+    max_breakpoints: int = 0
+
+@runtime_checkable
+class CacheStrategy(Protocol):
+    capability: CacheCapability
+    def cacheable_boundary(self, req: CanonicalRequest) -> int | None: ...  # feeds M1a: don't compress before here
+    def annotate(self, req: CanonicalRequest) -> CanonicalRequest: ...      # feeds M1b: mark a breakpoint (no-op for automatic/none)
+    # read side already exists: parse_usage(dialect, content) -> ProviderUsage
+
+_STRATEGIES: dict[Dialect, CacheStrategy] = {
+    Dialect.ANTHROPIC: AnthropicCacheStrategy(),  # explicit_breakpoint
+    Dialect.OPENAI:    OpenAiCacheStrategy(),      # automatic_prefix
+}
+def cache_strategy(dialect: Dialect) -> CacheStrategy:
+    return _STRATEGIES.get(dialect, NullCacheStrategy())  # unknown → cache-neutral, fail-open
+```
+
+**Separation of concerns — policy vs. representation vs. core** (this is what keeps the
+provider-specific *schema* out of the core):
+
+- **Strategy = policy** — *whether/where* to cache. `cacheable_boundary` / `annotate` operate on
+  an **abstract** breakpoint marked on a `Span`/`CanonicalRequest`; they never emit wire JSON.
+- **Dialect adapter = representation** — `serialize()` in `proxy/dialects.py` renders that
+  abstract breakpoint into the provider shape: `cache_control: {type:"ephemeral"}` for Anthropic,
+  **nothing** for OpenAI (it caches automatically), a cache-resource ref for Gemini. Provider
+  JSON stays where all the other provider JSON already lives.
+- **Core = provider-blind** — the engine calls `strategy.cacheable_boundary(req)` before
+  compressing (M1a) and `strategy.annotate(req)` optionally (M1b); it never touches a
+  `cache_control` literal.
+
+By capability:
+
+- **`explicit_breakpoint` (Anthropic):** both **preserve** and **inject**.
+- **`automatic_prefix` (OpenAI/DeepSeek):** **preserve** only — `annotate` is a no-op (the
+  provider caches on its own); the job is not to perturb the stable prefix so the automatic cache
+  keeps hitting.
+- **`none` (Groq):** `cacheable_boundary` is the whole request (compress freely), `annotate` a
+  no-op.
 
 **The universal invariant:** *cache-preservation* — request compression must never perturb the
 provider-cacheable prefix — is safe and beneficial on every caching provider and a no-op on
-non-caching ones. That is the "applicable to all providers" answer: parcus is
-cache-neutral-or-better everywhere, and cache-*injecting* only where the provider exposes
-explicit control. It composes with the existing fail-open tenet — if capability is unknown,
-treat as `none` and shrink only.
+non-caching ones. `NullCacheStrategy` makes this the structural default, so "applicable to all
+providers" is enforced by the type, not by discipline: parcus is **cache-neutral-or-better
+everywhere**, cache-*injecting* only where the provider exposes explicit control, and — per the
+fail-open tenet — an unknown dialect falls back to `NullCacheStrategy` (shrink only).
 
 ## 3. Mechanisms, tiered by leverage
 
@@ -66,17 +122,19 @@ Groq key validate it against ground-truth `prompt_tokens` today?
 Caching is a strict prefix match: any byte change before the last breakpoint invalidates
 everything after it (render order `tools → system → messages`). parcus's own request
 compression, if it touches the stable prefix, can silently convert a ~0.1× cache-read into a
-full-price cache-write — a **net loss**. The guard: detect the provider-cacheable prefix (an
-Anthropic `cache_control` block, or the harness's stable system+tools span) and treat
-everything ahead of it as immutable, compressing only the volatile tail.
+full-price cache-write — a **net loss**. The guard: `CacheStrategy.cacheable_boundary` (§2.1)
+returns the provider-cacheable prefix (an Anthropic `cache_control` block, or the harness's
+stable system+tools span); everything ahead of it is treated as immutable, compressing only the
+volatile tail.
 *Provider:* all caching providers. *Groq-testable:* **no** (Groq doesn't cache) — logic is
 unit-testable with fakes; ground-truth needs OpenAI (`cached_tokens` stays high after
 compression) or Anthropic (`cache_read_input_tokens` preserved).
 
 **M1b. Cache-injection (offensive, Anthropic-class only).**
-When a request has a large stable prefix but no `cache_control`, parcus adds an ephemeral
-breakpoint on the last stable block (respecting the token minimum + 4-breakpoint cap). A
-proxy-level ~90% cut on the re-sent prefix, zero meaning change. Request-only, in scope.
+When a request has a large stable prefix but no `cache_control`, `CacheStrategy.annotate` (§2.1)
+marks an abstract breakpoint on the last stable block (respecting the token minimum +
+4-breakpoint cap) and the dialect serializer renders it to `cache_control`. A proxy-level ~90%
+cut on the re-sent prefix, zero meaning change. Request-only, in scope.
 *Provider:* `explicit_breakpoint` (Anthropic). *Groq-testable:* **no** — needs an Anthropic key
 (verify `cache_read_input_tokens` jumps on the second identical request).
 
