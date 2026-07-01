@@ -5,7 +5,19 @@ All notable changes to parcus are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- **Accurate token measurement via `tiktoken` (was a 4-chars/token heuristic).** `default_tokenizer`
+  now uses a real BPE encoding when available (`TiktokenTokenizer`, exact for OpenAI-family models,
+  heuristic fallback offline). Real-provider validation showed the old heuristic **overstated
+  savings ~1.5–2.2×** because it over-counted the whitespace/filler compression removes; a real BPE
+  encoding tracks the provider's tokenizer with a near-constant offset, so the reported saved-token
+  delta is now accurate. `x-parcus-tokens-*` are parcus's measurement of the request text;
+  `x-parcus-upstream-*` remain the provider's billed truth. See `docs/validation/RESULTS.md`.
+
 ### Added
+- **Real-provider validation evidence** (`docs/validation/RESULTS.md`): parcus in front of Groq
+  (OpenAI-compatible), 10 passes × 4 prompt sizes — ground-truth savings (11–21%, ~19% overall,
+  Groq's own tokenizer), ~0 ms latency overhead, identical answers, plus live streaming + cache.
 - **Streaming requests are now compressed.** A streaming request (`"stream": true`) previously
   bypassed the engine entirely — no compression, and (a latent gap) no authorization or rate
   limiting. `ProxyEngine.prepare_stream` now applies the full request-side pipeline (route →
