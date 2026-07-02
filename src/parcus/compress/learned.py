@@ -82,6 +82,9 @@ class LearnedCompressor:
             touched = 0
             new_messages: list[Message] = []
             for message in request.messages:
+                if message.raw is not None:
+                    new_messages.append(message)  # structured content: preserve verbatim
+                    continue
                 new_spans: list[Span] = []
                 for span in message.spans:
                     if span.mutable:

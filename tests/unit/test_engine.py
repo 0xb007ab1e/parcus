@@ -93,6 +93,7 @@ def _engine(upstream: FakeUpstream, **kw: object) -> ProxyEngine:
             cache_enabled=bool(kw.get("cache_enabled", True)),
             cache_inject=bool(kw.get("cache_inject", False)),
             cache_inject_repeat_aware=bool(kw.get("cache_inject_repeat_aware", True)),
+            parse_structured=bool(kw.get("parse_structured", False)),
             multi_tenant=bool(kw.get("multi_tenant", False)),
             allowed_tenants=kw.get("allowed_tenants", frozenset()),  # type: ignore[arg-type]
         ),
@@ -134,6 +135,62 @@ def _anthropic_multi(*contents: str, system: str | None = None) -> bytes:
     if system is not None:
         body["system"] = system
     return json.dumps(body).encode()
+
+
+_STRUCTURED_CONVO: dict[str, object] = {
+    "model": "claude-x",
+    "messages": [
+        {"role": "user", "content": "run it"},
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "ok"},
+                {"type": "tool_use", "id": "tu_1", "name": "sh", "input": {"cmd": "ls"}},
+            ],
+        },
+        {
+            "role": "user",
+            "content": [{"type": "tool_result", "tool_use_id": "tu_1", "content": "a"}],
+        },
+    ],
+}
+
+
+class TestStructuredContent:
+    """M1d slice 1: structured requests canonicalize + round-trip through the full pipeline."""
+
+    async def test_structured_request_canonicalized_and_round_trips(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(up, cache_enabled=False, parse_structured=True)
+        body = json.dumps(_STRUCTURED_CONVO).encode()
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], body)
+        # Round-trips structurally through parse -> compress (raw preserved) -> serialize ...
+        assert json.loads(up.last.content) == _STRUCTURED_CONVO
+        # ... but was re-serialized (compact), proving it was canonicalized, not passed through.
+        assert up.last.content != body
+
+    async def test_structured_passed_through_when_flag_off(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(up, cache_enabled=False)  # parse_structured defaults False
+        body = json.dumps(_STRUCTURED_CONVO).encode()
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], body)
+        assert up.last.content == body  # verbatim passthrough — not canonicalized
+
+    async def test_injection_skipped_for_structured(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(
+            up,
+            cache_enabled=False,
+            parse_structured=True,
+            cache_inject=True,
+            cache_inject_repeat_aware=False,
+            tokenizer=FixedTokenizer(5000),
+        )
+        await eng.handle(
+            "POST", "/v1/messages", [("x-api-key", "k")], json.dumps(_STRUCTURED_CONVO).encode()
+        )
+        # No cache_control injected anywhere (structured injection is deferred to M1d slice 2).
+        assert json.loads(up.last.content) == _STRUCTURED_CONVO
 
 
 class TestCompactSerialization:

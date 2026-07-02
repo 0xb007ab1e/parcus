@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     # likely, keeping injection never-cost-more in expectation (issue #56). Off = always inject on
     # first sighting.
     cache_inject_repeat_aware: bool = True
+    # Canonicalize structured requests (tool_use/tool_result/image blocks, OpenAI tool calls) by
+    # carrying those messages verbatim, instead of passing them through untouched (M1d slice 1).
+    # Structured messages round-trip byte-for-byte and are left untouched by optimization here;
+    # off by default. See docs/design/structured-content-parser.md.
+    parse_structured: bool = False
 
     # Opt-in semantic (near-duplicate) cache — serve a cached response for a *similar* request.
     # OFF by default (trades correctness for tokens); validate the threshold with

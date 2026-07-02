@@ -21,6 +21,26 @@ def _req(*spans: Span, system: str | None = None) -> CanonicalRequest:
     )
 
 
+def test_filler_preserves_structured_raw_message() -> None:
+    # A structured (raw) message must be returned verbatim; only the text message is compressed.
+    raw = {
+        "role": "assistant",
+        "content": [{"type": "tool_use", "id": "t", "name": "x", "input": {}}],
+    }
+    req = CanonicalRequest(
+        dialect=Dialect.ANTHROPIC,
+        model="m",
+        messages=(
+            Message(role=Role.USER, spans=(Span("please just fix"),)),
+            Message(role=Role.ASSISTANT, spans=(), raw=raw),
+        ),
+    )
+    out, _ = FillerCompressor().compress(req)
+    assert out.messages[1] is req.messages[1]  # structured message untouched (same object)
+    assert out.messages[1].raw == raw
+    assert out.messages[0].text == "fix"  # the text message is still compressed
+
+
 class TestStripFillers:
     def test_removes_default_fillers(self) -> None:
         assert strip_fillers("please just fix this") == "fix this"

@@ -69,6 +69,11 @@ class EngineConfig:
             (within the provider cache window) so the ~1.25x cache-write premium is only paid when
             a repeat — and thus a ~0.1x cache-read — is likely (never-cost-more; issue #56). Default
             on; set off for unconditional "always inject" on the first sighting.
+        parse_structured: When on, canonicalize **structured** requests (tool_use/tool_result/image
+            blocks, OpenAI tool calls) by carrying those messages verbatim, instead of passing them
+            through (M1d slice 1). Structured messages round-trip byte-for-byte and are left
+            untouched by compression/injection/compaction here; the win in this slice is compact
+            serialization applying to tool-using traffic. Off by default.
     """
 
     anthropic_upstream: str
@@ -78,6 +83,7 @@ class EngineConfig:
     salt: str = ""
     cache_inject: bool = False
     cache_inject_repeat_aware: bool = True
+    parse_structured: bool = False
     # Graph memory (off by default). ingest builds the graph; inject (Track B) compacts via
     # retrieval; summarize (Track C) replaces older turns with a rolling summary.
     memory_enabled: bool = False
@@ -408,7 +414,7 @@ class ProxyEngine:
             return None
         if not isinstance(decoded, dict):
             return None
-        return parse(dialect, decoded)
+        return parse(dialect, decoded, structured=self._config.parse_structured)
 
     def _apply_memory(
         self, canonical: CanonicalRequest, tenant: str
@@ -428,6 +434,10 @@ class ProxyEngine:
             memory.ingest(canonical)
         except Exception:
             return canonical, "off"
+        if any(m.raw is not None for m in canonical.messages):
+            # Compaction over structured (tool_use/tool_result) turns is unsafe until designed
+            # (M1d) — it could break tool pairing. Ingest only; leave the request intact.
+            return canonical, "ingest"
         if self._config.memory_summarize:
             try:
                 summarized = compact_by_summary(
@@ -512,6 +522,8 @@ class ProxyEngine:
         """
         if not self._config.cache_inject:
             return request
+        if any(m.raw is not None for m in request.messages):
+            return request  # structured content: injection over blocks is deferred (M1d slice 2)
         try:
             strategy = cache_strategy(request.dialect)
             capability = strategy.capability
