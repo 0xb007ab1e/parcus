@@ -9,7 +9,8 @@ before an operator enables it — not by a runtime self-check. Accordingly each 
 
 Like every tier it only ever touches **mutable prose spans** (code, paths, URLs, quoted text,
 tool JSON, and the trailing instruction are never altered) and **fails open**: any error yields
-the request unchanged.
+the request unchanged. Inside **structured** messages it reduces only ``text`` blocks; immutable
+blocks (tool_use/tool_result/image) are reproduced verbatim.
 
 The actual token reduction is delegated to a :class:`TokenReducer` so the span handling is fully
 testable with a fake. The production reducer (:class:`LLMLinguaReducer`) is **local** (lazy
@@ -48,6 +49,37 @@ def _reduce_prose(text: str, reducer: TokenReducer, keep_ratio: float) -> str:
     )
 
 
+def _reduce_text_blocks(
+    raw: dict[str, Any], reducer: TokenReducer, keep_ratio: float
+) -> tuple[dict[str, Any], int]:
+    """Reduce the ``text`` blocks of a structured message; other blocks stay verbatim.
+
+    Only ``{"type": "text", "text": <str>, ...}`` blocks are touched (code-fence-aware via
+    :func:`_reduce_prose`); every other block (tool_use/tool_result/image) is reproduced verbatim.
+    Returns the message dict — the same object when its content isn't a block list or nothing
+    changed — and the number of text blocks altered.
+    """
+    content = raw.get("content")
+    if not isinstance(content, list):
+        return raw, 0
+    touched = 0
+    new_content: list[Any] = []
+    for block in content:
+        if (
+            isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
+        ):
+            reduced = _reduce_prose(block["text"], reducer, keep_ratio)
+            if reduced != block["text"]:
+                touched += 1
+                block = {**block, "text": reduced}
+        new_content.append(block)
+    if touched == 0:
+        return raw, 0
+    return {**raw, "content": new_content}, touched
+
+
 class LearnedCompressor:
     """Apply a local :class:`TokenReducer` to mutable spans only. Implements ``CompressorPort``.
 
@@ -83,7 +115,15 @@ class LearnedCompressor:
             new_messages: list[Message] = []
             for message in request.messages:
                 if message.raw is not None:
-                    new_messages.append(message)  # structured content: preserve verbatim
+                    # Structured content: reduce text blocks; other blocks verbatim.
+                    new_raw, block_touched = _reduce_text_blocks(
+                        message.raw, self._reducer, self._keep_ratio
+                    )
+                    touched += block_touched
+                    if new_raw is message.raw:
+                        new_messages.append(message)
+                    else:
+                        new_messages.append(Message(role=message.role, spans=(), raw=new_raw))
                     continue
                 new_spans: list[Span] = []
                 for span in message.spans:

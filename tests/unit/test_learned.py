@@ -38,8 +38,8 @@ class _NoopReducer:
         return text
 
 
-def test_learned_preserves_structured_raw_message() -> None:
-    # A structured (raw) message must be returned verbatim; only the text message is reduced.
+def test_learned_preserves_immutable_blocks_in_structured_message() -> None:
+    # A structured message with only immutable blocks (tool_result) must be returned verbatim.
     raw = {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "x"}]}
     req = CanonicalRequest(
         dialect=Dialect.ANTHROPIC,
@@ -50,9 +50,57 @@ def test_learned_preserves_structured_raw_message() -> None:
         ),
     )
     out, _ = LearnedCompressor(_HalfReducer(), keep_ratio=0.5).compress(req)
-    assert out.messages[1] is req.messages[1]  # structured message untouched (same object)
+    assert out.messages[1] is req.messages[1]  # no text block to reduce -> same object
     assert out.messages[1].raw == raw
     assert out.messages[0].text == "one two"  # ceil(4*0.5)=2 kept
+
+
+def test_learned_reduces_text_blocks_inside_structured_message() -> None:
+    # text blocks inside a structured message are reduced; sibling immutable blocks stay verbatim.
+    raw = {
+        "role": "assistant",
+        "content": [
+            {"type": "text", "text": "one two three four"},
+            {"type": "tool_use", "id": "t", "name": "sh", "input": {"cmd": "ls"}},
+        ],
+    }
+    req = CanonicalRequest(
+        dialect=Dialect.ANTHROPIC,
+        model="m",
+        messages=(Message(role=Role.ASSISTANT, spans=(), raw=raw),),
+    )
+    out, stats = LearnedCompressor(_HalfReducer(), keep_ratio=0.5).compress(req)
+    new_raw = out.messages[0].raw
+    assert new_raw is not None
+    assert new_raw["content"][0]["text"] == "one two"  # ceil(4*0.5)=2 kept
+    assert new_raw["content"][1] == raw["content"][1]  # tool_use block untouched
+    assert stats[0].spans_touched == 1
+
+
+def test_learned_leaves_structured_message_untouched_when_reduce_is_noop() -> None:
+    # A text block that the reducer doesn't shrink yields the same message object (touched=0).
+    raw = {"role": "assistant", "content": [{"type": "text", "text": "keep"}]}
+    req = CanonicalRequest(
+        dialect=Dialect.ANTHROPIC,
+        model="m",
+        messages=(Message(role=Role.ASSISTANT, spans=(), raw=raw),),
+    )
+    out, stats = LearnedCompressor(_NoopReducer()).compress(req)
+    assert out.messages[0] is req.messages[0]  # unchanged -> same object
+    assert stats[0].spans_touched == 0
+
+
+def test_learned_leaves_structured_message_with_non_list_content_verbatim() -> None:
+    # A raw message whose content isn't a block list (no text blocks to reach) is untouched.
+    raw = {"role": "user", "content": "plain string body"}
+    req = CanonicalRequest(
+        dialect=Dialect.ANTHROPIC,
+        model="m",
+        messages=(Message(role=Role.USER, spans=(), raw=raw),),
+    )
+    out, stats = LearnedCompressor(_HalfReducer(), keep_ratio=0.5).compress(req)
+    assert out.messages[0] is req.messages[0]  # same object -> verbatim
+    assert stats[0].spans_touched == 0
 
 
 class TestLearnedCompressor:

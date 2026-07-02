@@ -96,8 +96,9 @@ Once tool_result blocks are represented and round-trip-safe:
    fillers from `text` blocks, immutable blocks untouched, model-free guardrail unchanged); **M1b
    cache injection landed** (mark the last content block of the breakpoint message with
    `cache_control`, and preserve any harness-supplied `cache_control` rather than adding a competing
-   one). **Tier-2 learned over structured text remains a follow-up** (needs block-level span
-   decomposition; deferred to keep risk contained).
+   one). **Tier-2 learned landed** (reduce `text` blocks inside structured messages with the local
+   reducer, immutable tool_use/tool_result/image blocks untouched; still gated offline by the
+   answer-preservation judge, `ok=None` at runtime). All tiers now reach structured content.
 3. **M1d tool-result elision** ✓ *(landed)* — a lossy, opt-in `ToolResultElider` compressor tier
    (`elide_tool_results`, off by default) that stubs stale `tool_result` payloads (older than
    `elide_keep_recent`), preserving `tool_use_id`/`is_error`. Size-gated so it only fires when the
