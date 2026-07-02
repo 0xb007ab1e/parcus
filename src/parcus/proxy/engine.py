@@ -482,7 +482,14 @@ class ProxyEngine:
             # a no-op unless enabled and the provider/prefix qualify. Injection changes only the
             # cache_breakpoint marker, not the text, so the token metrics above are unaffected.
             chosen = self._inject_cache_breakpoint(chosen, tenant)
-            encoded = json.dumps(serialize(chosen, decoded), ensure_ascii=False)
+            # Serialise the forwarded body with compact separators (M1e): JSON structural
+            # whitespace is non-semantic, so this losslessly minifies the request envelope —
+            # notably verbose/pretty-printed tool schemas — without touching any string value
+            # (message prose is a JSON string, preserved byte-for-byte). Providers parse JSON
+            # identically. Passthrough (uncanonicalizable) bodies are forwarded untouched.
+            encoded = json.dumps(
+                serialize(chosen, decoded), ensure_ascii=False, separators=(",", ":")
+            )
             return encoded.encode("utf-8"), chosen, chosen_stats
         except Exception:
             # Fail open: forward the original body unchanged; report no token delta.

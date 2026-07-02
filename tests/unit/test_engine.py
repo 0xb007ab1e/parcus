@@ -136,6 +136,36 @@ def _anthropic_multi(*contents: str, system: str | None = None) -> bytes:
     return json.dumps(body).encode()
 
 
+class TestCompactSerialization:
+    """M1e: the forwarded canonicalized body is serialised as compact (lossless) JSON."""
+
+    async def test_body_uses_compact_separators(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(up, cache_enabled=False)
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], _anthropic("hi", system="s"))
+        sent = up.last.content
+        assert b'"messages":[' in sent  # compact: no space after ':' or before '['
+        assert b'"content":"hi"' in sent
+        assert b'"system":"s"' in sent
+        assert b'": "' not in sent  # no pretty ': ' structural spacing (safe for these inputs)
+
+    async def test_minifies_tool_schema_and_preserves_meaning(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(up, cache_enabled=False)
+        tools = [{"name": "read_file", "input_schema": {"type": "object"}}]
+        body = json.dumps(  # verbose, whitespace-heavy (as a harness might pretty-print)
+            {"model": "claude-x", "messages": [{"role": "user", "content": "go"}], "tools": tools},
+            indent=2,
+        ).encode()
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], body)
+        sent = up.last.content
+        assert b"\n" not in sent  # structural newlines from indent=2 are gone
+        assert len(sent) < len(body)  # strictly smaller
+        parsed = json.loads(sent)
+        assert parsed["tools"] == tools  # meaning preserved exactly
+        assert parsed["messages"][0]["content"] == "go"
+
+
 class TestCacheInjection:
     """M1b: gated provider prompt-cache breakpoint injection on the forwarded request."""
 
