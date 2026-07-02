@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     # a live request. Only explicit-breakpoint providers act on it. See
     # docs/design/token-reduction-roadmap.md §2.1 (M1b).
     cache_inject: bool = False
+    # When injecting, only do so once a prefix has been seen before (within the provider cache
+    # window) — the ~1.25x cache-write premium is then only paid when a repeat (a ~0.1x read) is
+    # likely, keeping injection never-cost-more in expectation (issue #56). Off = always inject on
+    # first sighting.
+    cache_inject_repeat_aware: bool = True
 
     # Opt-in semantic (near-duplicate) cache — serve a cached response for a *similar* request.
     # OFF by default (trades correctness for tokens); validate the threshold with

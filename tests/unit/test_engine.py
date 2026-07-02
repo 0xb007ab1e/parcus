@@ -92,6 +92,7 @@ def _engine(upstream: FakeUpstream, **kw: object) -> ProxyEngine:
             openai_upstream="https://o.test",
             cache_enabled=bool(kw.get("cache_enabled", True)),
             cache_inject=bool(kw.get("cache_inject", False)),
+            cache_inject_repeat_aware=bool(kw.get("cache_inject_repeat_aware", True)),
             multi_tenant=bool(kw.get("multi_tenant", False)),
             allowed_tenants=kw.get("allowed_tenants", frozenset()),  # type: ignore[arg-type]
         ),
@@ -145,9 +146,16 @@ class TestCacheInjection:
         sent = json.loads(up.last.content)
         assert sent["messages"][0]["content"] == "a"  # plain string, no cache_control
 
-    async def test_injects_breakpoint_on_last_stable_turn_when_prefix_large(self) -> None:
+    async def test_always_mode_injects_first_request(self) -> None:
+        # repeat_aware off → inject on the first sighting (the M1b-2 "always" behaviour).
         up = FakeUpstream()
-        eng = _engine(up, cache_enabled=False, cache_inject=True, tokenizer=FixedTokenizer(5000))
+        eng = _engine(
+            up,
+            cache_enabled=False,
+            cache_inject=True,
+            cache_inject_repeat_aware=False,
+            tokenizer=FixedTokenizer(5000),
+        )
         await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], _anthropic_multi("a", "b"))
         sent = json.loads(up.last.content)
         # boundary is 1 (protect the first turn) → cache_control on messages[0].
@@ -156,23 +164,56 @@ class TestCacheInjection:
         ]
         assert sent["messages"][1]["content"] == "b"  # volatile tail stays plain
 
+    async def test_repeat_aware_skips_first_then_injects_second(self) -> None:
+        # Default (repeat_aware on): the first sighting isn't injected (no write premium yet);
+        # the second identical request is (a read is now likely). Same engine → shared seen-set.
+        up = FakeUpstream()
+        eng = _engine(up, cache_enabled=False, cache_inject=True, tokenizer=FixedTokenizer(5000))
+        body = _anthropic_multi("a", "b")
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], body)
+        first = json.loads(up.last.content)
+        assert first["messages"][0]["content"] == "a"  # first sighting → not injected
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], body)
+        second = json.loads(up.last.content)
+        assert second["messages"][0]["content"] == [
+            {"type": "text", "text": "a", "cache_control": {"type": "ephemeral"}}
+        ]
+
     async def test_skips_when_prefix_below_min_tokens(self) -> None:
         up = FakeUpstream()
-        eng = _engine(up, cache_enabled=False, cache_inject=True, tokenizer=FixedTokenizer(10))
+        eng = _engine(
+            up,
+            cache_enabled=False,
+            cache_inject=True,
+            cache_inject_repeat_aware=False,
+            tokenizer=FixedTokenizer(10),
+        )
         await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], _anthropic_multi("a", "b"))
         sent = json.loads(up.last.content)
         assert sent["messages"][0]["content"] == "a"  # below 4096 → no breakpoint
 
     async def test_skips_single_message_no_protectable_prefix(self) -> None:
         up = FakeUpstream()
-        eng = _engine(up, cache_enabled=False, cache_inject=True, tokenizer=FixedTokenizer(5000))
+        eng = _engine(
+            up,
+            cache_enabled=False,
+            cache_inject=True,
+            cache_inject_repeat_aware=False,
+            tokenizer=FixedTokenizer(5000),
+        )
         await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], _anthropic_multi("only"))
         sent = json.loads(up.last.content)
         assert sent["messages"][0]["content"] == "only"  # boundary 0 → nothing to inject
 
     async def test_skips_for_openai_no_explicit_breakpoint(self) -> None:
         up = FakeUpstream()
-        eng = _engine(up, cache_enabled=False, cache_inject=True, tokenizer=FixedTokenizer(5000))
+        eng = _engine(
+            up,
+            cache_enabled=False,
+            cache_inject=True,
+            cache_inject_repeat_aware=False,
+            tokenizer=FixedTokenizer(5000),
+        )
         body = json.dumps(
             {
                 "model": "gpt-x",

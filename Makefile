@@ -47,7 +47,7 @@ cov-critical: ## Enforce 100% coverage on critical paths (transform/decision/det
 	  --cov=parcus.invariants --cov=parcus.eval.equivalence --cov=parcus.eval.quality \
 	  --cov=parcus.memory.compaction --cov=parcus.memory.provider --cov=parcus.tenant \
 	  --cov=parcus.quota --cov=parcus.cache.similarity --cov=parcus.cache.encryption \
-	  --cov=parcus.cache.epoch --cov=parcus.cache.strategy \
+	  --cov=parcus.cache.epoch --cov=parcus.cache.strategy --cov=parcus.cache.seen \
 	  --cov-branch --cov-fail-under=100 --cov-report=term-missing
 
 mutate: ## Mutation-test the critical modules (ephemeral via uvx; slow — nightly/on-demand)
