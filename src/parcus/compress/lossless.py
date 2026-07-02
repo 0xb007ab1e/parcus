@@ -16,6 +16,7 @@ unexpected error yields the original request unchanged.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from parcus.compress.sampling import VerifySampler
 from parcus.invariants import is_lossless_equivalent
@@ -56,6 +57,35 @@ def normalise_code_aware(text: str) -> str:
     )
 
 
+def _normalise_text_blocks(raw: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    """Whitespace-normalise the ``text`` blocks of a structured message (M1d slice 2).
+
+    Only ``{"type": "text", "text": <str>, ...}`` blocks are touched (code-fence-aware, lossless);
+    every other block (tool_use/tool_result/image) is reproduced verbatim. Returns the message dict
+    — the same object when its content isn't a block list or nothing changed — and the number of
+    text blocks altered.
+    """
+    content = raw.get("content")
+    if not isinstance(content, list):
+        return raw, 0
+    touched = 0
+    new_content: list[Any] = []
+    for block in content:
+        if (
+            isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
+        ):
+            normalised = normalise_code_aware(block["text"])
+            if normalised != block["text"]:
+                touched += 1
+                block = {**block, "text": normalised}
+        new_content.append(block)
+    if touched == 0:
+        return raw, 0
+    return {**raw, "content": new_content}, touched
+
+
 class LosslessCompressor:
     """Apply :func:`normalise_whitespace` to mutable spans only.
 
@@ -88,7 +118,13 @@ class LosslessCompressor:
             new_messages: list[Message] = []
             for message in request.messages:
                 if message.raw is not None:
-                    new_messages.append(message)  # structured content: preserve verbatim
+                    # Structured content: normalise text blocks (slice 2); other blocks verbatim.
+                    new_raw, block_touched = _normalise_text_blocks(message.raw)
+                    touched += block_touched
+                    if new_raw is message.raw:
+                        new_messages.append(message)
+                    else:
+                        new_messages.append(Message(role=message.role, spans=(), raw=new_raw))
                     continue
                 new_spans: list[Span] = []
                 for span in message.spans:

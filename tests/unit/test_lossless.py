@@ -19,6 +19,49 @@ def _req(*spans: Span, system: str | None = None) -> CanonicalRequest:
     )
 
 
+def _structured(
+    raw: dict[str, object], *, dialect: Dialect = Dialect.ANTHROPIC
+) -> CanonicalRequest:
+    return CanonicalRequest(
+        dialect=dialect,
+        model="m",
+        messages=(Message(role=Role.ASSISTANT, spans=(), raw=raw),),
+    )
+
+
+class TestStructuredTextBlocks:
+    """M1d slice 2: Tier-0 lossless normalises text blocks inside structured messages."""
+
+    def test_normalises_text_blocks_keeping_others_verbatim(self) -> None:
+        tool_use = {"type": "tool_use", "id": "t", "name": "x", "input": {"a": 1}}
+        req = _structured(
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "hello   \n\n\n\n\nworld   "}, tool_use],
+            }
+        )
+        out, stats = LosslessCompressor().compress(req)
+        content = out.messages[0].raw["content"]  # type: ignore[index]
+        assert content[0]["text"] == "hello\n\nworld"  # text block normalised
+        assert content[1] == tool_use  # non-text block reproduced verbatim
+        assert stats[0].spans_touched == 1
+
+    def test_clean_structured_message_untouched(self) -> None:
+        req = _structured({"role": "assistant", "content": [{"type": "text", "text": "clean"}]})
+        out, stats = LosslessCompressor().compress(req)
+        assert out.messages[0] is req.messages[0]  # nothing to normalise → same object
+        assert stats[0].spans_touched == 0
+
+    def test_nonlist_content_preserved(self) -> None:
+        # An OpenAI assistant with tool_calls carries content as a string (not a block list).
+        req = _structured(
+            {"role": "assistant", "content": "ok", "tool_calls": [{"id": "c"}]},
+            dialect=Dialect.OPENAI,
+        )
+        out, _stats = LosslessCompressor().compress(req)
+        assert out.messages[0] is req.messages[0]  # content isn't a block list → untouched
+
+
 class TestNormaliseWhitespace:
     def test_strips_trailing_whitespace(self) -> None:
         assert normalise_whitespace("a   \nb\t\nc") == "a\nb\nc"
