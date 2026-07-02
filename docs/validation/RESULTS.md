@@ -123,6 +123,14 @@ harness reads it back. This exercises the injection path end-to-end without a ne
 Run: `ANTHROPIC_API_KEY=… .venv/bin/python qa/cache-inject/validate.py` (four cheap calls; default
 `claude-haiku-4-5`, override with `--model`). Fill from its output:
 
+**Cost:** four calls (2 conditions × 2 turns), a ~5000-token prefix, `max_tokens=16` — input
+dominates (~20k input-equivalent tokens total, counting the `1.25×` cache-write and `0.10×`
+cache-read on the injected turns; output is negligible). Per full run: **~$0.02 on
+`claude-haiku-4-5`** (default), ~$0.06 on Sonnet-4.6, ~$0.10 on Opus-4.8 — cents either way, and
+~linear in `--prefix-tokens`. (Rough estimate ≈ `prefix_tokens × 3.35 × input_price`; check the
+current [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing) for exact
+per-token rates.)
+
 | condition | model | prefix tok (parcus est.) | turn-2 cache_read (billed) |
 |---|---|--:|--:|
 | baseline (inject off) | _TBD_ | _TBD_ | _TBD (expect ~0)_ |
