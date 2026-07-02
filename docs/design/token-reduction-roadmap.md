@@ -138,10 +138,12 @@ cut on the re-sent prefix, zero meaning change. Request-only, in scope.
 *Provider:* `explicit_breakpoint` (Anthropic). *Groq-testable:* **no** — needs an Anthropic key
 (verify `cache_read_input_tokens` jumps on the second identical request).
 
-**M1c. History compaction on the streaming path.**
-Track B (retrieval) and Track C (rolling summary) already exist but are off-by-default and
-**bypassed on streams** — which is where Claude Code lives. Wire them into the stream path
-behind the existing recall gate, fail-open.
+**M1c. History compaction on the streaming path.** ✓ *(already wired; regression test added)*
+Track B (retrieval) and Track C (rolling summary) run in the shared `canonicalize → memory →
+compress` pipeline that **both** `_handle` and `prepare_stream` use, so compaction already applies
+to streaming requests when memory is enabled — they are off by *default*, not bypassed on streams
+(the earlier note here was stale; the streaming-compression work wired the full request pipeline).
+Fail-open, behind the existing recall gate. Remaining work is enabling/tuning + eval, not wiring.
 *Provider:* all. *Groq-testable:* **yes** — savings appear in Groq `prompt_tokens`.
 
 **M1d. Tool-result elision in history (new).**
