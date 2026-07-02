@@ -14,6 +14,7 @@ error it returns the request unchanged.
 """
 
 from parcus.compress.chain import ChainCompressor
+from parcus.compress.dedup import DedupCompressor
 from parcus.compress.elision import ToolResultElider
 from parcus.compress.filler import AGGRESSIVE_FILLERS, DEFAULT_FILLERS, FillerCompressor
 from parcus.compress.learned import LearnedCompressor, LLMLinguaReducer, TokenReducer
@@ -24,6 +25,7 @@ __all__ = [
     "AGGRESSIVE_FILLERS",
     "DEFAULT_FILLERS",
     "ChainCompressor",
+    "DedupCompressor",
     "FillerCompressor",
     "LLMLinguaReducer",
     "LearnedCompressor",

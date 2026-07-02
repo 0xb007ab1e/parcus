@@ -22,6 +22,7 @@ from parcus.compress import (
     AGGRESSIVE_FILLERS,
     DEFAULT_FILLERS,
     ChainCompressor,
+    DedupCompressor,
     FillerCompressor,
     LearnedCompressor,
     LLMLinguaReducer,
@@ -102,6 +103,9 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
     if settings.elide_tool_results:
         # Lossy: stub stale tool_result payloads in structured turns (needs parse_structured).
         passes.append(ToolResultElider(keep_recent=settings.elide_keep_recent))
+    if settings.dedup:
+        # Lossy: collapse later byte-identical copies of a large block to a reference.
+        passes.append(DedupCompressor(min_chars=settings.dedup_min_chars))
     compressor: CompressorPort
     if not passes:
         compressor = NullCompressor()

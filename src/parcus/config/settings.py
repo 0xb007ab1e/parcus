@@ -85,6 +85,11 @@ class Settings(BaseSettings):
     # on the answer-preservation eval before enabling (M1d slice 3).
     elide_tool_results: bool = False
     elide_keep_recent: int = 4
+    # Lossy: within a request, replace a later byte-identical copy of a large block (see
+    # dedup_min_chars) with a reference to the first — e.g. the same file pasted across turns. Off
+    # by default; validate on the answer-preservation eval before enabling (Tier-2).
+    dedup: bool = False
+    dedup_min_chars: int = 200
 
     # Opt-in semantic (near-duplicate) cache — serve a cached response for a *similar* request.
     # OFF by default (trades correctness for tokens); validate the threshold with
