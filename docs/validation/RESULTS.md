@@ -76,9 +76,8 @@ are the provider's **billed** truth.
   than its input, the original is forwarded — so parcus never bills more than not compressing.
 - **Provider prompt-cache (PLAN Q3) not exercised on Groq:** Groq reports no `cache_read` tokens,
   so the "does injecting a breakpoint make the provider serve the prefix from cache?" question is
-  Anthropic-specific. The capture plumbing (`x-parcus-upstream-cache-read-tokens`) is in place and
-  verified; the M1b injection + its harness have landed (see the **M1b** section below), and the
-  live Anthropic run needs a key.
+  Anthropic-specific. **Now answered:** the M1b section below records a live Anthropic run where
+  injection took turn-2 `cache_read` from 0 to the full prefix (5627 tokens).
 - Savings depend on how much *mutable prose* a prompt carries; tool schemas / structured history
   are immutable to the filler tiers (history compaction via the memory tier is the lever there).
 
@@ -118,28 +117,37 @@ Turn-2 `cache_read`: **0 → 5000** — parcus injects the breakpoint (and only 
 harness reads it back. This exercises the injection path end-to-end without a network call; it does
 **not** substitute for the live provider run.
 
-## Live provider validation — PENDING (needs an Anthropic key)
+## Live provider validation — PASSED (Anthropic `claude-haiku-4-5`)
 
-Run: `ANTHROPIC_API_KEY=… .venv/bin/python qa/cache-inject/validate.py` (four cheap calls; default
-`claude-haiku-4-5`, override with `--model`). Fill from its output:
+Run via `qa/cache-inject/validate.py` against the **real Anthropic API** — the counts below are
+Anthropic's own billed usage (`x-parcus-upstream-*`), not an estimate:
 
-**Cost:** four calls (2 conditions × 2 turns), a ~5000-token prefix, `max_tokens=16` — input
-dominates (~20k input-equivalent tokens total, counting the `1.25×` cache-write and `0.10×`
-cache-read on the injected turns; output is negligible). Per full run: **~$0.02 on
-`claude-haiku-4-5`** (default), ~$0.06 on Sonnet-4.6, ~$0.10 on Opus-4.8 — cents either way, and
-~linear in `--prefix-tokens`. (Rough estimate ≈ `prefix_tokens × 3.35 × input_price`; check the
-current [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing) for exact
-per-token rates.)
+| condition | turn-1 (in / cache_w / cache_r) | turn-2 (in / cache_w / cache_r) |
+|---|---|---|
+| baseline (inject off) | 5641 / 0 / 0 | 5641 / 0 / 0 |
+| **inject on** | 14 / 5627 / 0 | 14 / 0 / **5627** |
 
-| condition | model | prefix tok (parcus est.) | turn-2 cache_read (billed) |
-|---|---|--:|--:|
-| baseline (inject off) | _TBD_ | _TBD_ | _TBD (expect ~0)_ |
-| inject on | _TBD_ | _TBD_ | _TBD (expect ≈ prefix)_ |
+Prefix ≈ 5041 parcus-tiktoken tokens ≈ **5627 Anthropic-billed**. **Turn-2 `cache_read`: 0 →
+5627** — with injection on, Anthropic served the entire re-sent prefix from its prompt cache and
+billed only the 14-token volatile tail; baseline paid full price on both turns. Meaning was
+preserved (only the `cache_control` marker changed; request text untouched).
 
-**Pass criterion:** inject-on turn-2 `cache_read` is ≫ baseline (≈ the stable-prefix token count),
-confirming the provider served the re-sent prefix from its cache. On a pass, record the numbers
-here and reconsider the `cache_inject` default. On no gain, check prefix size vs the model's cache
-minimum (4096 for Opus/Haiku, 2048 for Sonnet-4.6/Fable) and that the prefix is byte-stable turn to
-turn.
+**Economics** (billed input-token-equivalents; Anthropic cache read ≈ 0.1×, write ≈ 1.25×):
 
-_Offline self-test 2026-07-02; live Anthropic numbers pending._
+- **baseline, 2 turns:** `2 × 5641` = **11,282**.
+- **inject, 2 turns:** turn-1 `14 + 5627×1.25` (write) + turn-2 `14 + 5627×0.10` (read) ≈ **7,625**
+  → **~32% fewer** across just two turns (the first turn pays the 1.25× write premium).
+- **steady state, N re-sent turns:** baseline `N·P`; inject `1.25P + (N−1)·0.10P` → approaches
+  **~90% off the re-sent prefix** as turns accumulate. This is the agentic-harness win: system
+  prompt + tool schemas + history are re-sent every turn, and injection bills them at ~0.1× after
+  the first turn.
+
+**Cost to reproduce:** four calls (2 conditions × 2 turns), `max_tokens=16` — ~**$0.02** on
+`claude-haiku-4-5` (default), ~$0.06 Sonnet-4.6, ~$0.10 Opus-4.8 (≈ `prefix_tokens × 3.35 ×
+input_price`; see current [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing)).
+
+> `cache_inject` still ships **off by default** — flipping it on is a deliberate config decision
+> now that the win is validated; the injection is fail-open and only acts on explicit-breakpoint
+> providers above their cache minimum.
+
+_Validated 2026-07-02, Anthropic `claude-haiku-4-5`, prefix ≈5.6k tokens, 2 turns × {baseline, inject}._
