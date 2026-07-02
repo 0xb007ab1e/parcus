@@ -89,9 +89,12 @@ Once tool_result blocks are represented and round-trip-safe:
    shapes — **no optimization applied yet**. Pure fidelity + fail-open on unmodeled shapes. This is
    the foundation and the biggest correctness surface; land it with an exhaustive round-trip
    corpus before anything else.
-2. **Apply existing tiers to structured content** — run Tier-0/1 + M1b injection + M1c compaction
-   over the `text`/mutable blocks within structured messages (immutable blocks untouched). This is
-   where tool-using traffic finally gets the wins already built.
+2. **Apply existing tiers to structured content** — run the tiers over the `text` blocks within
+   structured messages (immutable tool_use/tool_result/image blocks untouched). This is where
+   tool-using traffic gets the wins already built. **Tier-0 lossless landed** (whitespace-normalise
+   text blocks, code-fence-aware, verbatim otherwise); **Tier-1 filler, Tier-2 learned, and M1b
+   injection over structured text remain follow-ups** (they need block-level span decomposition /
+   breakpoint placement, so they're deferred to keep this slice zero-risk).
 3. **M1d tool-result elision** — the lossy stale-result stub/summary, behind the answer-preservation
    gate.
 
