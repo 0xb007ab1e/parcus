@@ -151,3 +151,39 @@ input_price`; see current [Anthropic pricing](https://platform.claude.com/docs/e
 > providers above their cache minimum.
 
 _Validated 2026-07-02, Anthropic `claude-haiku-4-5`, prefix ≈5.6k tokens, 2 turns × {baseline, inject}._
+
+---
+
+# M1d — tool-result elision (answer-preservation gate)
+
+The lossy `elide_tool_results` tier stubs **stale** `tool_result` payloads (older than
+`elide_keep_recent`) in structured turns — the biggest history-token lever for tool-using
+harnesses — while preserving each block's `tool_use_id`/`is_error`. Because it drops content, it
+ships **off by default** and carries an answer-preservation gate rather than a runtime invariant.
+
+Gate: `parcus eval --elision` runs `ToolResultElider(keep_recent=4)` (the shipping default) over a
+corpus of ≥6-turn conversations and, via the deterministic keyword-recall judge, passes **only if**
+every answer-relevant phrase (in the recent, kept turns) survives **and** every stale phrase (in the
+elided payloads) is gone.
+
+```
+case                          recall    ok
+--------------------------------------------
+elide-stale-keeps-recent       100%    ok
+elide-stale-keeps-decision     100%    ok
+--------------------------------------------
+mean                           100%  PASS
+```
+
+Stale `deprecated feature flags` dropped; `10 replicas` / `30 seconds` / `300 seconds` / `fail open`
+preserved. The gate is proven to bite: unit tests assert it **fails** when nothing is elided
+(`keep_recent` too large → stale content survives) and when the answer lives inside the elided
+payload (over-elision → recall drops).
+
+**Honest scope:** this is a **model-free, CI-safe structural gate** (keyword recall over a small
+built-in corpus) — it proves elision removes the right content and keeps the answer-relevant
+content, not end-to-end task quality on production traffic. It's the no-regression prerequisite for
+enabling `elide_tool_results`; a real-provider before/after (like the Groq/Anthropic sections above)
+would additionally quantify the token win and confirm quality on live traffic.
+
+_Gate run 2026-07-02 (`parcus eval --elision`), `ToolResultElider(keep_recent=4)`, keyword-recall judge._
