@@ -62,6 +62,14 @@ class Settings(BaseSettings):
     cache_nocache_patterns: str = ""
     salt: str = ""
 
+    # Provider prompt-cache injection (opt-in, OFF by default). When on, parcus adds a provider
+    # cache breakpoint (Anthropic `cache_control`) to a large stable prefix so the provider serves
+    # it from its prompt cache on the next turn — the dominant cost lever for tool/history-heavy
+    # harnesses. Off until validated against a real provider key: a malformed breakpoint would 400
+    # a live request. Only explicit-breakpoint providers act on it. See
+    # docs/design/token-reduction-roadmap.md §2.1 (M1b).
+    cache_inject: bool = False
+
     # Opt-in semantic (near-duplicate) cache — serve a cached response for a *similar* request.
     # OFF by default (trades correctness for tokens); validate the threshold with
     # `parcus eval --similarity` before raising it.

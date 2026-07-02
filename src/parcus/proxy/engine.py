@@ -20,10 +20,18 @@ from typing import Any
 from parcus.cache.key import compute_key
 from parcus.cache.policy import CachePolicy
 from parcus.cache.similarity import SimilarityCache
+from parcus.cache.strategy import cache_strategy
 from parcus.memory.compaction import compact_by_summary, compact_with_memory
 from parcus.memory.provider import MemoryProvider, SharedMemoryProvider
 from parcus.memory.summary import ExtractiveSummarizer, Summarizer
-from parcus.model import CachedResponse, CanonicalRequest, CompressionStats, Dialect, Role
+from parcus.model import (
+    CachedResponse,
+    CacheModel,
+    CanonicalRequest,
+    CompressionStats,
+    Dialect,
+    Role,
+)
 from parcus.obs import MetricsSink, NullSink, SavingsEvent, StageStat
 from parcus.ports import CachePort, CompressorPort, MemoryPort, RedactorPort, TokenizerPort
 from parcus.proxy.dialects import detect, parse, serialize
@@ -52,6 +60,9 @@ class EngineConfig:
         cache_enabled: Whether the response cache is active.
         cache_ttl_seconds: TTL applied to stored responses.
         salt: Per-install salt for cache-key domain separation.
+        cache_inject: Whether to inject a provider prompt-cache breakpoint on a large stable
+            prefix (M1b). Off by default; only explicit-breakpoint providers (Anthropic) act on
+            it, and only when the prefix meets the provider's ``min_prefix_tokens``.
     """
 
     anthropic_upstream: str
@@ -59,6 +70,7 @@ class EngineConfig:
     cache_enabled: bool = True
     cache_ttl_seconds: int = 86_400
     salt: str = ""
+    cache_inject: bool = False
     # Graph memory (off by default). ingest builds the graph; inject (Track B) compacts via
     # retrieval; summarize (Track C) replaces older turns with a rolling summary.
     memory_enabled: bool = False
@@ -445,17 +457,52 @@ class ProxyEngine:
         try:
             decoded = json.loads(original)
             compressed, stats = self._compressor.compress(working)
+            chosen: CanonicalRequest
+            chosen_stats: tuple[CompressionStats, ...]
             if self._safe_count(compressed.text, compressed.model) > self._safe_count(
                 working.text, working.model
             ):
                 # Compression expanded the token count — discard it, forward `working` as-is.
-                reverted = json.dumps(serialize(working, decoded), ensure_ascii=False)
-                return reverted.encode("utf-8"), working, ()
-            encoded = json.dumps(serialize(compressed, decoded), ensure_ascii=False)
-            return encoded.encode("utf-8"), compressed, stats
+                chosen, chosen_stats = working, ()
+            else:
+                chosen, chosen_stats = compressed, stats
+            # Prompt-cache injection (M1b) — mark a breakpoint on a large stable prefix so the
+            # provider serves it from its cache next turn. Applied to whichever request we forward;
+            # a no-op unless enabled and the provider/prefix qualify. Injection changes only the
+            # cache_breakpoint marker, not the text, so the token metrics above are unaffected.
+            chosen = self._inject_cache_breakpoint(chosen)
+            encoded = json.dumps(serialize(chosen, decoded), ensure_ascii=False)
+            return encoded.encode("utf-8"), chosen, chosen_stats
         except Exception:
             # Fail open: forward the original body unchanged; report no token delta.
             return original, working, ()
+
+    def _inject_cache_breakpoint(self, request: CanonicalRequest) -> CanonicalRequest:
+        """Mark a provider cache breakpoint on a qualifying stable prefix, else return unchanged.
+
+        Gated (fail open): only when :attr:`EngineConfig.cache_inject` is on, the dialect's
+        provider caches at explicit breakpoints, and the cacheable prefix (``system`` + ``tools`` +
+        the protected turns) meets the provider's ``min_prefix_tokens`` — measured with the engine's
+        tokenizer, which the pure strategy deliberately doesn't have. Below the minimum a breakpoint
+        would not cache anyway, so injecting only adds block-list overhead; skip it.
+        """
+        if not self._config.cache_inject:
+            return request
+        try:
+            strategy = cache_strategy(request.dialect)
+            capability = strategy.capability
+            if capability.model is not CacheModel.EXPLICIT_BREAKPOINT:
+                return request
+            boundary = strategy.cacheable_boundary(request)
+            if boundary is None or boundary < 1:
+                return request
+            prefix = (request.system or "") + (request.tools_json or "")
+            prefix += "".join(m.text for m in request.messages[:boundary])
+            if self._safe_count(prefix, request.model) < capability.min_prefix_tokens:
+                return request
+            return strategy.annotate(request)
+        except Exception:
+            return request
 
     def _stage_stats(
         self,
