@@ -150,7 +150,9 @@ Fail-open, behind the existing recall gate. Remaining work is enabling/tuning + 
 Old `tool_result` blocks are re-sent verbatim but rarely needed in full; in later turns replace
 a large stale result with a stub/summary + re-expand pointer. Lossy → rides the
 answer-preservation gate. Provider-agnostic analog of Anthropic's server-side
-`clear_tool_uses_20250919` context editing.
+`clear_tool_uses_20250919` context editing. **Prerequisite:** expanding the text-only canonical
+parser to structured content (the PLAN's "top M2 task") — planned in
+`docs/design/structured-content-parser.md`, which also unlocks M1b/M1c/M1e for tool-using turns.
 *Provider:* all. *Groq-testable:* **yes**.
 
 **M1e. Tool-schema minification.**
