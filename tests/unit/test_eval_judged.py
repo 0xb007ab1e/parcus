@@ -9,9 +9,18 @@ from parcus.compress import (
     LearnedCompressor,
     LosslessCompressor,
     NullCompressor,
+    ToolResultElider,
 )
-from parcus.eval import BUILTIN_JUDGED_SAMPLES, JudgedSample, evaluate_judged
+from parcus.eval import (
+    BUILTIN_ELISION_SAMPLES,
+    BUILTIN_JUDGED_SAMPLES,
+    JudgedElisionSample,
+    JudgedSample,
+    evaluate_judged,
+    evaluate_judged_elision,
+)
 from parcus.eval.quality import KeywordRecallJudge
+from parcus.model import CanonicalRequest, Dialect, Message, Role
 
 
 class _DropReducer:
@@ -28,6 +37,41 @@ _SAMPLES = (
     JudgedSample(name="keeps", prompt="please scale to 10 replicas", must_include=("10 replicas",)),
     JudgedSample(name="empty", prompt="anything", must_include=()),
 )
+
+
+def _elision_req(*messages: Message) -> CanonicalRequest:
+    return CanonicalRequest(dialect=Dialect.ANTHROPIC, model="eval", messages=tuple(messages))
+
+
+def _raw_tool_result(text: str) -> Message:
+    block = {"type": "tool_result", "tool_use_id": "t", "content": text}
+    return Message(role=Role.USER, spans=(), raw={"role": "user", "content": [block]})
+
+
+class TestJudgedElision:
+    def test_gate_passes_on_builtin_corpus(self) -> None:
+        report = evaluate_judged_elision(BUILTIN_ELISION_SAMPLES, ToolResultElider(keep_recent=4))
+        assert report.passed
+        assert report.mean_score == 1.0
+
+    def test_gate_fails_when_stale_not_removed(self) -> None:
+        # keep_recent covers everything → nothing is elided → the must_drop phrase survives → FAIL.
+        report = evaluate_judged_elision(BUILTIN_ELISION_SAMPLES, ToolResultElider(keep_recent=100))
+        assert not report.passed
+
+    def test_gate_fails_on_over_elision(self) -> None:
+        # The answer-relevant phrase lives *inside* the (large) tool result that gets elided →
+        # recall drops → the gate correctly flags the loss.
+        sample = JudgedElisionSample(
+            name="over-elide",
+            request=_elision_req(
+                _raw_tool_result("CRITICAL ANSWER: 42 widgets. " + "padding text; " * 50)
+            ),
+            must_include=("42 widgets",),
+            must_drop=(),
+        )
+        report = evaluate_judged_elision((sample,), ToolResultElider(keep_recent=0))
+        assert not report.passed
 
 
 class TestEvaluateJudged:

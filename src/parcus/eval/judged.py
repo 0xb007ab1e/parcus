@@ -24,11 +24,14 @@ from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
 from parcus.ports import CompressorPort
 
 __all__ = [
+    "BUILTIN_ELISION_SAMPLES",
     "BUILTIN_JUDGED_SAMPLES",
     "JudgedCase",
+    "JudgedElisionSample",
     "JudgedReport",
     "JudgedSample",
     "evaluate_judged",
+    "evaluate_judged_elision",
 ]
 
 
@@ -130,6 +133,116 @@ def evaluate_judged(
             )
         )
     return JudgedReport(cases=tuple(cases))
+
+
+@dataclass(frozen=True, slots=True)
+class JudgedElisionSample:
+    """A structured conversation whose elided form must keep the answer and drop stale results.
+
+    Args:
+        name: Identifier.
+        request: The structured request (raw tool_result-bearing turns) to run elision over.
+        must_include: Answer-relevant phrases that live in recent/kept turns and must survive.
+        must_drop: Stale tool-result phrases that elision is expected to remove.
+    """
+
+    name: str
+    request: CanonicalRequest
+    must_include: tuple[str, ...]
+    must_drop: tuple[str, ...]
+
+
+def evaluate_judged_elision(
+    samples: Iterable[JudgedElisionSample],
+    elider: CompressorPort,
+    judge: QualityJudge | None = None,
+) -> JudgedReport:
+    """Elide each structured sample and judge answer preservation + stale-content removal.
+
+    A case passes only if the recall judge finds every ``must_include`` phrase in the elided
+    request **and** every ``must_drop`` phrase is gone — i.e. elision removed the stale tool output
+    without dropping anything answer-relevant. Model-free and CI-safe (the elider is injected).
+    """
+    judge = judge or KeywordRecallJudge()
+    cases: list[JudgedCase] = []
+    for sample in samples:
+        compressed, _ = elider.compress(sample.request)
+        text = compressed.text
+        verdict = judge.judge(text, sample.must_include)
+        dropped = all(phrase not in text for phrase in sample.must_drop)
+        cases.append(
+            JudgedCase(
+                name=sample.name,
+                score=verdict.score,
+                passed=verdict.passed and dropped,
+                compressed=text,
+            )
+        )
+    return JudgedReport(cases=tuple(cases))
+
+
+def _raw_turn(role: Role, content: object) -> Message:
+    """A structured (verbatim-carried) message for the elision corpus."""
+    return Message(role=role, spans=(), raw={"role": role.value, "content": content})
+
+
+def _tool_result(text: str, tool_use_id: str) -> dict[str, object]:
+    return {"type": "tool_result", "tool_use_id": tool_use_id, "content": text}
+
+
+def _text_block(text: str) -> dict[str, object]:
+    return {"type": "text", "text": text}
+
+
+# A stale tool-result payload (well over the elision stub length) with a distinctive phrase we
+# expect elision to remove; the answer-relevant facts live in the recent turns instead.
+_STALE_DUMP = (
+    "STALE TOOL OUTPUT: the legacy deployment used 3 replicas and several "
+    "deprecated feature flags. " + "verbose historical log line that is no longer relevant; " * 40
+)
+
+# Structured conversations (≥6 turns so the default keep_recent=4 window still leaves the early
+# tool result eligible): the stale dump must be elided while recent answer facts survive.
+BUILTIN_ELISION_SAMPLES: tuple[JudgedElisionSample, ...] = (
+    JudgedElisionSample(
+        name="elide-stale-keeps-recent",
+        request=CanonicalRequest(
+            dialect=Dialect.ANTHROPIC,
+            model="eval",
+            messages=(
+                _raw_turn(Role.USER, [_tool_result(_STALE_DUMP, "t1")]),
+                _raw_turn(Role.ASSISTANT, [_text_block("Noted the earlier state.")]),
+                _raw_turn(Role.USER, [_text_block("Continuing the migration.")]),
+                _raw_turn(Role.ASSISTANT, [_text_block("Understood.")]),
+                _raw_turn(
+                    Role.USER, [_text_block("Current setup: 10 replicas, 30 seconds timeout.")]
+                ),
+                Message(role=Role.USER, spans=(Span("How many replicas are we running now?"),)),
+            ),
+        ),
+        must_include=("10 replicas", "30 seconds"),
+        must_drop=("deprecated feature flags",),
+    ),
+    JudgedElisionSample(
+        name="elide-stale-keeps-decision",
+        request=CanonicalRequest(
+            dialect=Dialect.ANTHROPIC,
+            model="eval",
+            messages=(
+                _raw_turn(Role.USER, [_tool_result(_STALE_DUMP, "t2")]),
+                _raw_turn(Role.ASSISTANT, [_text_block("Reviewed the dump.")]),
+                _raw_turn(Role.USER, [_text_block("Filler turn one.")]),
+                _raw_turn(Role.ASSISTANT, [_text_block("Filler turn two.")]),
+                _raw_turn(
+                    Role.USER, [_text_block("Decision: cache TTL is 300 seconds, fail open.")]
+                ),
+                Message(role=Role.USER, spans=(Span("Remind me of the cache TTL decision."),)),
+            ),
+        ),
+        must_include=("300 seconds", "fail open"),
+        must_drop=("deprecated feature flags",),
+    ),
+)
 
 
 # A small corpus: filler-rich prompts whose must-include phrases are content (survive filler
