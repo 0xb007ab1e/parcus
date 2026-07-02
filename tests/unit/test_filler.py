@@ -41,6 +41,55 @@ def test_filler_preserves_structured_raw_message() -> None:
     assert out.messages[0].text == "fix"  # the text message is still compressed
 
 
+def test_filler_strips_text_blocks_in_structured_message() -> None:
+    tool_use = {"type": "tool_use", "id": "t", "name": "x", "input": {}}
+    req = CanonicalRequest(
+        dialect=Dialect.ANTHROPIC,
+        model="m",
+        messages=(
+            Message(
+                role=Role.USER,
+                spans=(),
+                raw={
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "please just fix this"},
+                        {"type": "text", "text": "already clean"},
+                        tool_use,
+                    ],
+                },
+            ),
+        ),
+    )
+    out, stats = FillerCompressor().compress(req)
+    content = out.messages[0].raw["content"]
+    assert content[0]["text"] == "fix this"  # fillers stripped from the text block
+    assert content[1]["text"] == "already clean"  # a filler-free text block is unchanged
+    assert content[2] == tool_use  # non-text block reproduced verbatim
+    assert stats[0].spans_touched == 1
+
+
+def test_filler_structured_nonlist_content_preserved() -> None:
+    req = CanonicalRequest(
+        dialect=Dialect.OPENAI,
+        model="m",
+        messages=(
+            Message(
+                role=Role.ASSISTANT,
+                spans=(),
+                raw={
+                    "role": "assistant",
+                    "content": "please just fix",
+                    "tool_calls": [{"id": "c"}],
+                },
+            ),
+        ),
+    )
+    out, stats = FillerCompressor().compress(req)
+    assert out.messages[0] is req.messages[0]  # content isn't a block list → untouched
+    assert stats[0].spans_touched == 0
+
+
 class TestStripFillers:
     def test_removes_default_fillers(self) -> None:
         assert strip_fillers("please just fix this") == "fix this"
