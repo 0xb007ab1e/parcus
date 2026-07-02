@@ -1,8 +1,9 @@
 """Unit tests for the per-provider cache strategies and the dialect registry.
 
-Covers the M1a slice: the ``CacheStrategy`` port's two implementations (``NullCacheStrategy``,
-``AnthropicCacheStrategy``), their capability descriptors, the cacheable-prefix boundary logic,
-the fail-open identity ``annotate``, and the ``cache_strategy`` registry fallback.
+Covers the ``CacheStrategy`` port's two implementations (``NullCacheStrategy``,
+``AnthropicCacheStrategy``): their capability descriptors, the cacheable-prefix boundary logic
+(M1a), the breakpoint-marking ``annotate`` (M1b) and its fail-open identity cases, and the
+``cache_strategy`` registry fallback.
 """
 
 from __future__ import annotations
@@ -112,9 +113,37 @@ class TestAnthropicCacheStrategy:
         strat = AnthropicCacheStrategy()
         assert strat.cacheable_boundary(_req()) is None
 
-    def test_annotate_is_identity_pending_m1b(self) -> None:
-        req = _req(messages=(_msg("a"), _msg("b")), system="s")
-        assert AnthropicCacheStrategy().annotate(req) is req
+    def test_annotate_marks_last_stable_turn(self) -> None:
+        strat = AnthropicCacheStrategy()
+        three = (_msg("sys ctx"), _msg("prior"), _msg("the question"))
+        out = strat.annotate(_req(messages=three, system="s"))
+        # boundary is 2 (protect first two turns) → breakpoint on messages[1], the last stable turn.
+        assert out.cache_breakpoint == 1
+
+    def test_annotate_two_messages_marks_first(self) -> None:
+        strat = AnthropicCacheStrategy()
+        out = strat.annotate(_req(messages=(_msg("a"), _msg("b"))))
+        assert out.cache_breakpoint == 0
+
+    def test_annotate_preserves_other_fields(self) -> None:
+        strat = AnthropicCacheStrategy()
+        req = _req(messages=(_msg("a"), _msg("b")), system="s", tools_json="[]")
+        out = strat.annotate(req)
+        assert out.dialect == req.dialect
+        assert out.messages == req.messages
+        assert out.system == req.system
+        assert out.tools_json == req.tools_json
+
+    def test_annotate_single_message_is_identity(self) -> None:
+        # boundary is 0 (no protectable turn); system/tools-only injection is a later slice.
+        strat = AnthropicCacheStrategy()
+        req = _req(messages=(_msg("only turn"),), system="s")
+        assert strat.annotate(req) is req
+
+    def test_annotate_empty_request_is_identity(self) -> None:
+        strat = AnthropicCacheStrategy()
+        req = _req()
+        assert strat.annotate(req) is req
 
 
 # --- Registry ---------------------------------------------------------------------------------

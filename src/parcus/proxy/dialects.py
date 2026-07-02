@@ -124,7 +124,10 @@ def serialize(request: CanonicalRequest, original_body: dict[str, Any]) -> dict[
     """Re-serialise a (compressed) canonical request back into its provider body.
 
     Only the text fields produced from the canonical model are rewritten; all other original
-    fields (model, params, tools, stream, …) are preserved.
+    fields (model, params, tools, stream, …) are preserved. When ``request.cache_breakpoint`` is
+    set on an Anthropic request, that message's content is rendered as a single text block
+    carrying ``cache_control: {"type": "ephemeral"}`` (the M1b injection); every other message
+    keeps the plain-string form, so an un-annotated request serialises byte-identically to before.
 
     Args:
         request: The canonical request (typically post-compression).
@@ -134,7 +137,31 @@ def serialize(request: CanonicalRequest, original_body: dict[str, Any]) -> dict[
         A new body dict ready to serialise and forward upstream.
     """
     new_body = dict(original_body)
-    new_body["messages"] = [{"role": m.role.value, "content": m.text} for m in request.messages]
+    breakpoint_at = _anthropic_breakpoint_index(request)
+    messages: list[dict[str, Any]] = []
+    for i, m in enumerate(request.messages):
+        if i == breakpoint_at:
+            content: Any = [
+                {"type": "text", "text": m.text, "cache_control": {"type": "ephemeral"}}
+            ]
+        else:
+            content = m.text
+        messages.append({"role": m.role.value, "content": content})
+    new_body["messages"] = messages
     if request.dialect is Dialect.ANTHROPIC and request.system is not None:
         new_body["system"] = request.system
     return new_body
+
+
+def _anthropic_breakpoint_index(request: CanonicalRequest) -> int | None:
+    """Return the in-range message index to mark with ``cache_control``, else ``None``.
+
+    Only Anthropic requests take an explicit breakpoint; an out-of-range or unset marker renders
+    nothing (defensive — the request serialises unchanged).
+    """
+    idx = request.cache_breakpoint
+    if request.dialect is not Dialect.ANTHROPIC or idx is None:
+        return None
+    if 0 <= idx < len(request.messages):
+        return idx
+    return None

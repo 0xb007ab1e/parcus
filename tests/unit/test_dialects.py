@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from parcus.model import Dialect, Role
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
 from parcus.proxy.dialects import detect, parse, serialize
 
 
@@ -99,3 +99,55 @@ class TestSerialize:
         out = serialize(req, {"model": "gpt-x", "messages": []})
         assert out["messages"] == [{"role": "user", "content": "hi"}]
         assert out["model"] == "gpt-x"
+
+    def test_no_breakpoint_serialises_plain_strings(self) -> None:
+        # An un-annotated request keeps the plain-string content form (byte-identical to before).
+        req = parse(
+            Dialect.ANTHROPIC,
+            {"messages": [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}]},
+        )
+        assert req is not None
+        out = serialize(req, {"messages": []})
+        assert out["messages"] == [
+            {"role": "user", "content": "a"},
+            {"role": "assistant", "content": "b"},
+        ]
+
+
+class TestSerializeCacheBreakpoint:
+    def _req(
+        self, dialect: Dialect, texts: tuple[str, ...], cache_breakpoint: int | None
+    ) -> CanonicalRequest:
+        return CanonicalRequest(
+            dialect=dialect,
+            model="m",
+            messages=tuple(Message(role=Role.USER, spans=(Span(t),)) for t in texts),
+            cache_breakpoint=cache_breakpoint,
+        )
+
+    def test_anthropic_renders_cache_control_at_marked_message(self) -> None:
+        req = self._req(Dialect.ANTHROPIC, ("stable", "volatile"), cache_breakpoint=0)
+        out = serialize(req, {"messages": []})
+        assert out["messages"][0] == {
+            "role": "user",
+            "content": [{"type": "text", "text": "stable", "cache_control": {"type": "ephemeral"}}],
+        }
+        # Only the marked message is expanded; the rest stay plain strings.
+        assert out["messages"][1] == {"role": "user", "content": "volatile"}
+
+    def test_out_of_range_breakpoint_is_ignored(self) -> None:
+        req = self._req(Dialect.ANTHROPIC, ("a", "b"), cache_breakpoint=99)
+        out = serialize(req, {"messages": []})
+        assert out["messages"] == [
+            {"role": "user", "content": "a"},
+            {"role": "user", "content": "b"},
+        ]
+
+    def test_openai_ignores_breakpoint(self) -> None:
+        # cache_control is Anthropic-specific; an OpenAI request never renders it.
+        req = self._req(Dialect.OPENAI, ("a", "b"), cache_breakpoint=0)
+        out = serialize(req, {"messages": []})
+        assert out["messages"] == [
+            {"role": "user", "content": "a"},
+            {"role": "user", "content": "b"},
+        ]

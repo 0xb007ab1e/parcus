@@ -134,6 +134,11 @@ class CanonicalRequest:
         messages: The conversation turns.
         stream: Whether the client requested a streaming response.
         tools_json: Verbatim, immutable tool/function schema JSON, if present.
+        cache_breakpoint: Index into ``messages`` of the message whose content-end carries an
+            abstract prompt-cache breakpoint, or ``None`` for none. Set by a
+            :class:`~parcus.ports.CacheStrategy`'s ``annotate`` (provider-agnostic policy); the
+            dialect serialiser renders it to the provider's concrete form (Anthropic
+            ``cache_control``) or ignores it. See ``docs/design/token-reduction-roadmap.md`` §2.1.
     """
 
     dialect: Dialect
@@ -142,6 +147,7 @@ class CanonicalRequest:
     system: str | None = None
     stream: bool = False
     tools_json: str | None = None
+    cache_breakpoint: int | None = None
 
     @property
     def text(self) -> str:

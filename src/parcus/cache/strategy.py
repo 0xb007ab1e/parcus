@@ -14,6 +14,8 @@ a boundary. Nothing here modifies a provider response or emits provider wire JSO
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from parcus.model import CacheCapability, CacheModel, CanonicalRequest, Dialect
 from parcus.ports import CacheStrategy
 
@@ -52,9 +54,9 @@ class AnthropicCacheStrategy:
     """Explicit-breakpoint caching (Anthropic ``cache_control``).
 
     Preservation (M1a) is implemented via :meth:`cacheable_boundary`. The stable, re-sent prefix
-    is ``system`` + ``tools`` + every turn except the final (volatile) instruction. Breakpoint
-    *injection* (M1b) requires the dialect serialiser to render ``cache_control`` and is deferred
-    to that slice, so :meth:`annotate` is currently the identity (a safe, fail-open no-op).
+    is ``system`` + ``tools`` + every turn except the final (volatile) instruction. Injection
+    (M1b) is implemented via :meth:`annotate`, which marks a breakpoint on the last stable turn;
+    the dialect serialiser renders it to ``cache_control``.
     """
 
     capability = CacheCapability(
@@ -75,8 +77,17 @@ class AnthropicCacheStrategy:
         return len(request.messages) - 1
 
     def annotate(self, request: CanonicalRequest) -> CanonicalRequest:
-        """Return ``request`` unchanged — breakpoint injection (M1b) is a later serialiser slice."""
-        return request
+        """Mark a cache breakpoint on the last stable turn so the prefix caches; else unchanged.
+
+        Places the breakpoint on ``messages[boundary - 1]`` (the final protected turn), which
+        caches ``tools`` + ``system`` + every turn up to and including it. Returns ``request``
+        unchanged when there is no protectable message turn (``boundary`` is ``None`` or ``0`` —
+        the system/tools-only case is deferred to a later slice). Fail-open: never raises.
+        """
+        boundary = self.cacheable_boundary(request)
+        if boundary is None or boundary < 1:
+            return request
+        return replace(request, cache_breakpoint=boundary - 1)
 
 
 _STRATEGIES: dict[Dialect, CacheStrategy] = {
