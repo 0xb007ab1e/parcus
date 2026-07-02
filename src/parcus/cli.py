@@ -27,6 +27,7 @@ from parcus.compress import (
     LLMLinguaReducer,
     LosslessCompressor,
     NullCompressor,
+    ToolResultElider,
 )
 from parcus.config import Settings
 from parcus.eval import (
@@ -96,6 +97,9 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
         # Local LLMLingua reducer; model loads lazily on first use (the 'learned' extra). Last
         # in the chain — operate on already-losslessly/filler-trimmed prose.
         passes.append(LearnedCompressor(LLMLinguaReducer(), keep_ratio=settings.learned_ratio))
+    if settings.elide_tool_results:
+        # Lossy: stub stale tool_result payloads in structured turns (needs parse_structured).
+        passes.append(ToolResultElider(keep_recent=settings.elide_keep_recent))
     compressor: CompressorPort
     if not passes:
         compressor = NullCompressor()

@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     # Structured messages round-trip byte-for-byte and are left untouched by optimization here;
     # off by default. See docs/design/structured-content-parser.md.
     parse_structured: bool = False
+    # Lossy: replace stale tool_result payloads (older than elide_keep_recent messages) with a
+    # compact stub — the biggest history-token lever for tool-using harnesses. Off by default;
+    # only affects structured turns (needs parse_structured) and, being lossy, should be validated
+    # on the answer-preservation eval before enabling (M1d slice 3).
+    elide_tool_results: bool = False
+    elide_keep_recent: int = 4
 
     # Opt-in semantic (near-duplicate) cache — serve a cached response for a *similar* request.
     # OFF by default (trades correctness for tokens); validate the threshold with
