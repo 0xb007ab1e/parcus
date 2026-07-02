@@ -187,3 +187,37 @@ enabling `elide_tool_results`; a real-provider before/after (like the Groq/Anthr
 would additionally quantify the token win and confirm quality on live traffic.
 
 _Gate run 2026-07-02 (`parcus eval --elision`), `ToolResultElider(keep_recent=4)`, keyword-recall judge._
+
+---
+
+# Tier-2 — cross-turn dedup (answer-preservation gate)
+
+The lossy `dedup` tier collapses a **repeated** block within a request — the same file/context
+pasted across turns — keeping the first occurrence and replacing later byte-identical copies with a
+reference. Content-addressed at the span level, so it also catches repeated **immutable** (fenced
+code) blocks. Ships **off by default**, never-cost-more (only blocks larger than the reference
+marker are eligible).
+
+Gate: `parcus eval --dedup` runs `DedupCompressor()` over a corpus that pastes the same ≥200-char
+block twice across turns, and passes **only if** the recall judge finds every answer-relevant phrase
+(preserved in the kept first copy) **and** a duplicate was actually collapsed (`spans_touched > 0`)
+— so it can't pass vacuously on a sample where nothing was deduplicated.
+
+```
+case                          recall    ok
+--------------------------------------------
+dedup-repeated-config          100%    ok
+--------------------------------------------
+mean                           100%  PASS
+```
+
+The later copy of the config block was collapsed to a reference; the kept first copy preserved
+`10 replicas` / `30 second`. The gate is proven to bite: unit tests assert it **fails** when nothing
+is deduped (the block appears once) and when the required content is absent.
+
+**Honest scope:** as with elision, this is a **model-free, CI-safe structural gate** (keyword recall
+over a small corpus) — it proves dedup keeps the answer-relevant content and only removes a genuine
+duplicate, not end-to-end task quality on production traffic. It's the no-regression prerequisite
+for enabling `dedup`.
+
+_Gate run 2026-07-02 (`parcus eval --dedup`), `DedupCompressor(min_chars=200)`, keyword-recall judge._
