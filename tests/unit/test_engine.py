@@ -70,6 +70,16 @@ class ExpandingCompressor:
         return expanded, (CompressionStats(step="evil", tokens_before=1, tokens_after=99),)
 
 
+class FixedTokenizer:
+    """Returns a constant token count regardless of input (drives the min-prefix gate in tests)."""
+
+    def __init__(self, count: int) -> None:
+        self._count = count
+
+    def count(self, text: str, model: str | None = None) -> int:
+        return self._count
+
+
 def _engine(upstream: FakeUpstream, **kw: object) -> ProxyEngine:
     return ProxyEngine(
         upstream=upstream,
@@ -81,12 +91,14 @@ def _engine(upstream: FakeUpstream, **kw: object) -> ProxyEngine:
             anthropic_upstream="https://a.test",
             openai_upstream="https://o.test",
             cache_enabled=bool(kw.get("cache_enabled", True)),
+            cache_inject=bool(kw.get("cache_inject", False)),
             multi_tenant=bool(kw.get("multi_tenant", False)),
             allowed_tenants=kw.get("allowed_tenants", frozenset()),  # type: ignore[arg-type]
         ),
         metrics=kw.get("metrics"),  # type: ignore[arg-type]
         rate_limiter=kw.get("rate_limiter"),  # type: ignore[arg-type]
         similarity=kw.get("similarity"),  # type: ignore[arg-type]
+        tokenizer=kw.get("tokenizer"),  # type: ignore[arg-type]
     )
 
 
@@ -110,6 +122,66 @@ def _anthropic(content: str, *, system: str | None = None, stream: bool = False)
     if stream:
         body["stream"] = True
     return json.dumps(body).encode()
+
+
+def _anthropic_multi(*contents: str, system: str | None = None) -> bytes:
+    """An Anthropic body with multiple user turns (for exercising cache-breakpoint placement)."""
+    body: dict[str, object] = {
+        "model": "claude-x",
+        "messages": [{"role": "user", "content": c} for c in contents],
+    }
+    if system is not None:
+        body["system"] = system
+    return json.dumps(body).encode()
+
+
+class TestCacheInjection:
+    """M1b: gated provider prompt-cache breakpoint injection on the forwarded request."""
+
+    async def test_off_by_default(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(up, cache_enabled=False)  # cache_inject defaults False
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], _anthropic_multi("a", "b"))
+        sent = json.loads(up.last.content)
+        assert sent["messages"][0]["content"] == "a"  # plain string, no cache_control
+
+    async def test_injects_breakpoint_on_last_stable_turn_when_prefix_large(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(up, cache_enabled=False, cache_inject=True, tokenizer=FixedTokenizer(5000))
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], _anthropic_multi("a", "b"))
+        sent = json.loads(up.last.content)
+        # boundary is 1 (protect the first turn) → cache_control on messages[0].
+        assert sent["messages"][0]["content"] == [
+            {"type": "text", "text": "a", "cache_control": {"type": "ephemeral"}}
+        ]
+        assert sent["messages"][1]["content"] == "b"  # volatile tail stays plain
+
+    async def test_skips_when_prefix_below_min_tokens(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(up, cache_enabled=False, cache_inject=True, tokenizer=FixedTokenizer(10))
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], _anthropic_multi("a", "b"))
+        sent = json.loads(up.last.content)
+        assert sent["messages"][0]["content"] == "a"  # below 4096 → no breakpoint
+
+    async def test_skips_single_message_no_protectable_prefix(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(up, cache_enabled=False, cache_inject=True, tokenizer=FixedTokenizer(5000))
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], _anthropic_multi("only"))
+        sent = json.loads(up.last.content)
+        assert sent["messages"][0]["content"] == "only"  # boundary 0 → nothing to inject
+
+    async def test_skips_for_openai_no_explicit_breakpoint(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(up, cache_enabled=False, cache_inject=True, tokenizer=FixedTokenizer(5000))
+        body = json.dumps(
+            {
+                "model": "gpt-x",
+                "messages": [{"role": "user", "content": "a"}, {"role": "user", "content": "b"}],
+            }
+        ).encode()
+        await eng.handle("POST", "/v1/chat/completions", [("authorization", "Bearer k")], body)
+        sent = json.loads(up.last.content)
+        assert sent["messages"][0]["content"] == "a"  # OpenAI = automatic-prefix → no injection
 
 
 class TestForwardingAndCompression:
