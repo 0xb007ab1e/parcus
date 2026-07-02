@@ -95,8 +95,10 @@ Once tool_result blocks are represented and round-trip-safe:
    text blocks, code-fence-aware, verbatim otherwise); **Tier-1 filler, Tier-2 learned, and M1b
    injection over structured text remain follow-ups** (they need block-level span decomposition /
    breakpoint placement, so they're deferred to keep this slice zero-risk).
-3. **M1d tool-result elision** — the lossy stale-result stub/summary, behind the answer-preservation
-   gate.
+3. **M1d tool-result elision** ✓ *(landed)* — a lossy, opt-in `ToolResultElider` compressor tier
+   (`elide_tool_results`, off by default) that stubs stale `tool_result` payloads (older than
+   `elide_keep_recent`), preserving `tool_use_id`/`is_error`. Size-gated so it only fires when the
+   payload exceeds the stub (never-cost-more), fail-open; validate on `eval --judged` before use.
 
 Each slice is independently shippable and reviewable; slice 1 carries the risk and must be
 over-tested before slices 2–3 build on it.
