@@ -1,16 +1,18 @@
 """Detect the provider dialect and parse/serialise between it and the canonical model.
 
-M1 supports a deliberately **conservative, text-only subset** so the round-trip can never
-corrupt a request:
+The **text-only subset** (always accepted) decomposes plain ``{role, content: str}`` messages
+into spans so the compression tiers apply:
 
-* Anthropic Messages — a string ``system`` (or none) and messages whose ``content`` is a
-  string.
+* Anthropic Messages — a string ``system`` (or none) and messages whose ``content`` is a string.
 * OpenAI Chat Completions — messages that are exactly ``{role, content:str}`` with role in
   system/user/assistant.
 
-Anything outside the subset (content blocks, images, tool_use/tool_result, ``tool`` role,
-extra per-message keys) returns ``None`` from :func:`parse` — the engine then forwards the
-request **unmodified** (fail open). Broadening this to structured content is the top M2 task.
+With ``structured=True`` (M1d slice 1), messages outside that subset — content blocks, images,
+tool_use/tool_result, OpenAI tool calls / ``tool`` role — are **carried verbatim** (``Message.raw``)
+so the round-trip reproduces them byte-for-byte and optimizations leave them untouched. Anything
+still unhandled (unknown role, Anthropic block-list ``system``) returns ``None`` from :func:`parse`
+— the engine forwards the request **unmodified** (fail open). See
+``docs/design/structured-content-parser.md``.
 """
 
 from __future__ import annotations
@@ -23,8 +25,8 @@ from parcus.spans import classify_spans
 
 __all__ = ["detect", "parse", "serialize"]
 
-_ANTHROPIC_ROLES = {Role.USER, Role.ASSISTANT}
-_OPENAI_ROLES = {Role.SYSTEM, Role.USER, Role.ASSISTANT}
+_ANTHROPIC_ROLES = frozenset({Role.USER, Role.ASSISTANT})
+_OPENAI_ROLES = frozenset({Role.SYSTEM, Role.USER, Role.ASSISTANT})
 
 
 def detect(path: str) -> Dialect:
@@ -50,27 +52,50 @@ def _tools_json(body: dict[str, Any]) -> str | None:
     return json.dumps(tools, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
-def parse(dialect: Dialect, body: dict[str, Any]) -> CanonicalRequest | None:
-    """Parse a provider body into a canonical request, or ``None`` if outside the M1 subset.
+def parse(
+    dialect: Dialect, body: dict[str, Any], *, structured: bool = False
+) -> CanonicalRequest | None:
+    """Parse a provider body into a canonical request, or ``None`` if outside the handled subset.
 
     Args:
         dialect: The detected dialect.
         body: The decoded JSON request body.
+        structured: When ``True``, also accept **structured** messages (block-list content, tool
+            calls, tool role) by carrying each such message dict verbatim (``Message.raw``) so it
+            round-trips byte-for-byte and optimizations leave it untouched (M1d slice 1). When
+            ``False`` (default), only the plain-text subset is accepted; anything else → ``None``.
 
     Returns:
-        A :class:`CanonicalRequest` for safely-handled text-only requests, else ``None``.
+        A :class:`CanonicalRequest` for handled requests, else ``None`` (the engine passes those
+        through unmodified).
     """
     if dialect is Dialect.ANTHROPIC:
-        return _parse_anthropic(body)
+        return _parse_anthropic(body, structured=structured)
     if dialect is Dialect.OPENAI:
-        return _parse_openai(body)
+        return _parse_openai(body, structured=structured)
     return None
 
 
-def _parse_anthropic(body: dict[str, Any]) -> CanonicalRequest | None:
-    system = body.get("system")
-    if system is not None and not isinstance(system, str):
-        return None
+def _message(
+    role: Role, item: dict[str, Any], text_roles: frozenset[Role], structured: bool
+) -> Message | None:
+    """Build a canonical message, or ``None`` if the item can't be safely round-tripped.
+
+    Plain ``{role, content: str}`` (in ``text_roles``) decomposes into spans so the existing tiers
+    apply. Any other shape is carried verbatim as ``raw`` when ``structured`` is set (round-trips
+    exactly, untouched by optimization); otherwise it is unhandled → ``None``.
+    """
+    content = item.get("content")
+    if role in text_roles and set(item.keys()) == {"role", "content"} and isinstance(content, str):
+        return Message(role=role, spans=classify_spans(content))
+    if structured:
+        return Message(role=role, spans=(), raw=item)
+    return None
+
+
+def _parse_messages(
+    body: dict[str, Any], text_roles: frozenset[Role], structured: bool
+) -> list[Message] | None:
     raw = body.get("messages")
     if not isinstance(raw, list):
         return None
@@ -79,10 +104,22 @@ def _parse_anthropic(body: dict[str, Any]) -> CanonicalRequest | None:
         if not isinstance(item, dict):
             return None
         role = _role(item.get("role"))
-        content = item.get("content")
-        if role not in _ANTHROPIC_ROLES or not isinstance(content, str):
+        if role is None:  # unknown role → can't safely round-trip; pass the whole request through
             return None
-        messages.append(Message(role=role, spans=classify_spans(content)))
+        message = _message(role, item, text_roles, structured)
+        if message is None:
+            return None
+        messages.append(message)
+    return messages
+
+
+def _parse_anthropic(body: dict[str, Any], *, structured: bool) -> CanonicalRequest | None:
+    system = body.get("system")
+    if system is not None and not isinstance(system, str):
+        return None  # system-as-block-list is deferred (see the design note); pass through
+    messages = _parse_messages(body, _ANTHROPIC_ROLES, structured)
+    if messages is None:
+        return None
     return CanonicalRequest(
         dialect=Dialect.ANTHROPIC,
         model=body.get("model"),
@@ -93,23 +130,10 @@ def _parse_anthropic(body: dict[str, Any]) -> CanonicalRequest | None:
     )
 
 
-def _parse_openai(body: dict[str, Any]) -> CanonicalRequest | None:
-    raw = body.get("messages")
-    if not isinstance(raw, list):
+def _parse_openai(body: dict[str, Any], *, structured: bool) -> CanonicalRequest | None:
+    messages = _parse_messages(body, _OPENAI_ROLES, structured)
+    if messages is None:
         return None
-    messages: list[Message] = []
-    for item in raw:
-        if not isinstance(item, dict):
-            return None
-        # Only the plain {role, content} shape is safe to round-trip; anything with
-        # tool_calls / tool_call_id / name etc. must pass through untouched.
-        if set(item.keys()) - {"role", "content"}:
-            return None
-        role = _role(item.get("role"))
-        content = item.get("content")
-        if role not in _OPENAI_ROLES or not isinstance(content, str):
-            return None
-        messages.append(Message(role=role, spans=classify_spans(content)))
     return CanonicalRequest(
         dialect=Dialect.OPENAI,
         model=body.get("model"),
@@ -140,6 +164,9 @@ def serialize(request: CanonicalRequest, original_body: dict[str, Any]) -> dict[
     breakpoint_at = _anthropic_breakpoint_index(request)
     messages: list[dict[str, Any]] = []
     for i, m in enumerate(request.messages):
+        if m.raw is not None:
+            messages.append(m.raw)  # structured message: reproduce the original dict verbatim
+            continue
         if i == breakpoint_at:
             content: Any = [
                 {"type": "text", "text": m.text, "cache_control": {"type": "ephemeral"}}

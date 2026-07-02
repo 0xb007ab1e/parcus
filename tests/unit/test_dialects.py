@@ -114,6 +114,110 @@ class TestSerialize:
         ]
 
 
+class TestStructuredRoundTrip:
+    """M1d slice 1: structured messages are carried verbatim and round-trip structurally exact."""
+
+    def _assert_roundtrips(self, dialect: Dialect, body: dict[str, object]) -> None:
+        req = parse(dialect, body, structured=True)
+        assert req is not None
+        assert serialize(req, body) == body  # parse -> serialize identity (modulo separators)
+
+    def test_anthropic_tool_use_and_result(self) -> None:
+        self._assert_roundtrips(
+            Dialect.ANTHROPIC,
+            {
+                "model": "claude-x",
+                "messages": [
+                    {"role": "user", "content": "run it"},
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": "ok"},
+                            {
+                                "type": "tool_use",
+                                "id": "tu_1",
+                                "name": "sh",
+                                "input": {"cmd": "ls"},
+                            },
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "tool_result", "tool_use_id": "tu_1", "content": "a\nb"},
+                        ],
+                    },
+                ],
+            },
+        )
+
+    def test_anthropic_image_block(self) -> None:
+        self._assert_roundtrips(
+            Dialect.ANTHROPIC,
+            {
+                "model": "claude-x",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/png",
+                                    "data": "iVBOR",
+                                },
+                            },
+                            {"type": "text", "text": "what is this"},
+                        ],
+                    }
+                ],
+            },
+        )
+
+    def test_openai_tool_calls_and_tool_role(self) -> None:
+        self._assert_roundtrips(
+            Dialect.OPENAI,
+            {
+                "model": "gpt-x",
+                "messages": [
+                    {"role": "user", "content": "weather?"},
+                    {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "c1",
+                                "type": "function",
+                                "function": {"name": "w", "arguments": "{}"},
+                            },
+                        ],
+                    },
+                    {"role": "tool", "tool_call_id": "c1", "content": "sunny"},
+                ],
+            },
+        )
+
+    def test_structured_off_passes_through_as_none(self) -> None:
+        body = {
+            "model": "m",
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "x"}]}],
+        }
+        assert parse(Dialect.ANTHROPIC, body) is None  # structured defaults False → unhandled
+
+    def test_unknown_role_is_none_even_structured(self) -> None:
+        body = {"model": "m", "messages": [{"role": "developer", "content": "x"}]}
+        assert parse(Dialect.OPENAI, body, structured=True) is None  # unknown role → passthrough
+
+    def test_anthropic_block_system_is_none_even_structured(self) -> None:
+        body = {
+            "model": "m",
+            "system": [{"type": "text", "text": "sys"}],
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+        assert parse(Dialect.ANTHROPIC, body, structured=True) is None  # block-list system deferred
+
+
 class TestSerializeCacheBreakpoint:
     def _req(
         self, dialect: Dialect, texts: tuple[str, ...], cache_breakpoint: int | None

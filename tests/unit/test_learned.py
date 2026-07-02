@@ -38,6 +38,23 @@ class _NoopReducer:
         return text
 
 
+def test_learned_preserves_structured_raw_message() -> None:
+    # A structured (raw) message must be returned verbatim; only the text message is reduced.
+    raw = {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "x"}]}
+    req = CanonicalRequest(
+        dialect=Dialect.ANTHROPIC,
+        model="m",
+        messages=(
+            Message(role=Role.ASSISTANT, spans=(Span("one two three four"),)),
+            Message(role=Role.USER, spans=(), raw=raw),
+        ),
+    )
+    out, _ = LearnedCompressor(_HalfReducer(), keep_ratio=0.5).compress(req)
+    assert out.messages[1] is req.messages[1]  # structured message untouched (same object)
+    assert out.messages[1].raw == raw
+    assert out.messages[0].text == "one two"  # ceil(4*0.5)=2 kept
+
+
 class TestLearnedCompressor:
     def test_reduces_mutable_prose(self) -> None:
         comp = LearnedCompressor(_HalfReducer(), keep_ratio=0.5)

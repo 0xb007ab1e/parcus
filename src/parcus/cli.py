@@ -135,6 +135,7 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
             salt=settings.salt,
             cache_inject=settings.cache_inject,
             cache_inject_repeat_aware=settings.cache_inject_repeat_aware,
+            parse_structured=settings.parse_structured,
             memory_enabled=settings.memory,
             memory_inject=settings.memory_inject,
             memory_summarize=settings.memory_summarize,

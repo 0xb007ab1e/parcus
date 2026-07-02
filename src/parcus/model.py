@@ -13,8 +13,10 @@ are immutable by construction (see :mod:`parcus.compress`).
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from typing import Any
 
 __all__ = [
     "CacheCapability",
@@ -111,15 +113,29 @@ class Message:
 
     Args:
         role: Who authored the message.
-        spans: Ordered spans whose concatenation is the message body.
+        spans: Ordered spans whose concatenation is the message body (empty for a structured
+            message carried via ``raw``).
+        raw: For **structured** content (tool_use/tool_result/image blocks, OpenAI tool calls)
+            that the text-only path can't decompose, the verbatim original message dict — so the
+            serializer reproduces it byte-for-byte and optimizations leave it untouched. ``None``
+            for a plain-text message (the common case). See
+            ``docs/design/structured-content-parser.md``.
     """
 
     role: Role
     spans: tuple[Span, ...]
+    raw: dict[str, Any] | None = None
 
     @property
     def text(self) -> str:
-        """The full message body (concatenation of all span texts)."""
+        """The full message body — span concatenation, or a stable JSON view of ``raw``.
+
+        A structured message's stable JSON view keeps the cache key (which hashes ``text``)
+        unique across differing structured content and gives token measurement something to
+        count. It is not the wire form — the serializer writes ``raw`` verbatim.
+        """
+        if self.raw is not None:
+            return json.dumps(self.raw, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
         return "".join(s.text for s in self.spans)
 
 
