@@ -5,6 +5,7 @@ from __future__ import annotations
 from parcus.compress import (
     AGGRESSIVE_FILLERS,
     ChainCompressor,
+    DedupCompressor,
     FillerCompressor,
     LearnedCompressor,
     LosslessCompressor,
@@ -12,15 +13,18 @@ from parcus.compress import (
     ToolResultElider,
 )
 from parcus.eval import (
+    BUILTIN_DEDUP_SAMPLES,
     BUILTIN_ELISION_SAMPLES,
     BUILTIN_JUDGED_SAMPLES,
+    JudgedDedupSample,
     JudgedElisionSample,
     JudgedSample,
     evaluate_judged,
+    evaluate_judged_dedup,
     evaluate_judged_elision,
 )
 from parcus.eval.quality import KeywordRecallJudge
-from parcus.model import CanonicalRequest, Dialect, Message, Role
+from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
 
 
 class _DropReducer:
@@ -71,6 +75,42 @@ class TestJudgedElision:
             must_drop=(),
         )
         report = evaluate_judged_elision((sample,), ToolResultElider(keep_recent=0))
+        assert not report.passed
+
+
+def _msg(role: Role, *spans: Span) -> Message:
+    return Message(role=role, spans=spans)
+
+
+class TestJudgedDedup:
+    _BIG = "10 replicas and a 30 second timeout. " + "padding detail line; " * 30
+
+    def test_gate_passes_on_builtin_corpus(self) -> None:
+        report = evaluate_judged_dedup(BUILTIN_DEDUP_SAMPLES, DedupCompressor())
+        assert report.passed
+        assert report.mean_score == 1.0
+
+    def test_gate_fails_when_nothing_deduped(self) -> None:
+        # A large block that appears only once → dedup doesn't fire → the gate must NOT pass
+        # vacuously even though the content is trivially present.
+        sample = JudgedDedupSample(
+            name="no-repeat",
+            request=_elision_req(_msg(Role.USER, Span(self._BIG))),
+            must_include=("10 replicas",),
+        )
+        report = evaluate_judged_dedup((sample,), DedupCompressor())
+        assert not report.passed
+
+    def test_gate_fails_when_content_missing(self) -> None:
+        # A repeated block is deduped, but the required phrase isn't present → recall fails.
+        sample = JudgedDedupSample(
+            name="missing",
+            request=_elision_req(
+                _msg(Role.USER, Span(self._BIG)), _msg(Role.USER, Span(self._BIG))
+            ),
+            must_include=("nonexistent phrase",),
+        )
+        report = evaluate_judged_dedup((sample,), DedupCompressor())
         assert not report.passed
 
 
