@@ -176,7 +176,7 @@ class TestStructuredContent:
         await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], body)
         assert up.last.content == body  # verbatim passthrough — not canonicalized
 
-    async def test_injection_skipped_for_structured(self) -> None:
+    async def test_injection_marks_last_stable_structured_turn(self) -> None:
         up = FakeUpstream()
         eng = _engine(
             up,
@@ -189,8 +189,49 @@ class TestStructuredContent:
         await eng.handle(
             "POST", "/v1/messages", [("x-api-key", "k")], json.dumps(_STRUCTURED_CONVO).encode()
         )
-        # No cache_control injected anywhere (structured injection is deferred to M1d slice 2).
-        assert json.loads(up.last.content) == _STRUCTURED_CONVO
+        sent = json.loads(up.last.content)
+        # boundary is 2 → breakpoint on messages[1] (the last stable turn); cache_control lands on
+        # its last block. The volatile final turn (messages[2]) is left unmarked.
+        assert sent["messages"][1]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+        assert all("cache_control" not in block for block in sent["messages"][2]["content"])
+
+    async def test_injection_skipped_when_harness_manages_cache_control(self) -> None:
+        # M1a preservation: if the request already carries a cache_control breakpoint, parcus must
+        # not add a competing one (avoids fighting the harness / exceeding the 4-breakpoint cap).
+        convo: dict[str, object] = {
+            "model": "claude-x",
+            "messages": [
+                {"role": "user", "content": "run it"},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "ok"},
+                        {
+                            "type": "tool_use",
+                            "id": "tu_1",
+                            "name": "sh",
+                            "input": {"cmd": "ls"},
+                            "cache_control": {"type": "ephemeral"},
+                        },
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "tool_result", "tool_use_id": "tu_1", "content": "a"}],
+                },
+            ],
+        }
+        up = FakeUpstream()
+        eng = _engine(
+            up,
+            cache_enabled=False,
+            parse_structured=True,
+            cache_inject=True,
+            cache_inject_repeat_aware=False,
+            tokenizer=FixedTokenizer(5000),
+        )
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], json.dumps(convo).encode())
+        assert json.loads(up.last.content) == convo  # untouched — harness caching preserved
 
 
 class TestCompactSerialization:

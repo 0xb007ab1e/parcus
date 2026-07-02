@@ -92,9 +92,12 @@ Once tool_result blocks are represented and round-trip-safe:
 2. **Apply existing tiers to structured content** — run the tiers over the `text` blocks within
    structured messages (immutable tool_use/tool_result/image blocks untouched). This is where
    tool-using traffic gets the wins already built. **Tier-0 lossless landed** (whitespace-normalise
-   text blocks, code-fence-aware, verbatim otherwise); **Tier-1 filler, Tier-2 learned, and M1b
-   injection over structured text remain follow-ups** (they need block-level span decomposition /
-   breakpoint placement, so they're deferred to keep this slice zero-risk).
+   text blocks, code-fence-aware, verbatim otherwise); **Tier-1 filler landed** (strip allow-listed
+   fillers from `text` blocks, immutable blocks untouched, model-free guardrail unchanged); **M1b
+   cache injection landed** (mark the last content block of the breakpoint message with
+   `cache_control`, and preserve any harness-supplied `cache_control` rather than adding a competing
+   one). **Tier-2 learned over structured text remains a follow-up** (needs block-level span
+   decomposition; deferred to keep risk contained).
 3. **M1d tool-result elision** ✓ *(landed)* — a lossy, opt-in `ToolResultElider` compressor tier
    (`elide_tool_results`, off by default) that stubs stale `tool_result` payloads (older than
    `elide_keep_recent`), preserving `tool_use_id`/`is_error`. Size-gated so it only fires when the

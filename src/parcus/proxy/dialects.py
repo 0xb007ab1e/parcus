@@ -165,7 +165,8 @@ def serialize(request: CanonicalRequest, original_body: dict[str, Any]) -> dict[
     messages: list[dict[str, Any]] = []
     for i, m in enumerate(request.messages):
         if m.raw is not None:
-            messages.append(m.raw)  # structured message: reproduce the original dict verbatim
+            # Structured message: verbatim, or with a cache_control breakpoint on its last block.
+            messages.append(_mark_raw(m.raw) if i == breakpoint_at else m.raw)
             continue
         if i == breakpoint_at:
             content: Any = [
@@ -178,6 +179,22 @@ def serialize(request: CanonicalRequest, original_body: dict[str, Any]) -> dict[
     if request.dialect is Dialect.ANTHROPIC and request.system is not None:
         new_body["system"] = request.system
     return new_body
+
+
+def _mark_raw(raw: dict[str, Any]) -> dict[str, Any]:
+    """Add a ``cache_control`` breakpoint to the last content block of a structured message.
+
+    Anthropic caches up to and including the marked block. Returns the message unchanged if its
+    content isn't a non-empty block list (no safe place for a block-level marker → no injection).
+    """
+    content = raw.get("content")
+    if not isinstance(content, list) or not content:
+        return raw
+    last = content[-1]
+    if not isinstance(last, dict):
+        return raw
+    marked = {**last, "cache_control": {"type": "ephemeral"}}
+    return {**raw, "content": [*content[:-1], marked]}
 
 
 def _anthropic_breakpoint_index(request: CanonicalRequest) -> int | None:
