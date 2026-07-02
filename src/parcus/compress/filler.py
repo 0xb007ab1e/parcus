@@ -14,6 +14,7 @@ conservative, and a quality judge for aggressive sets is planned (see ``PLAN.md`
 from __future__ import annotations
 
 import string
+from typing import Any
 
 from parcus.compress.sampling import VerifySampler
 from parcus.invariants import is_filler_equivalent
@@ -131,7 +132,13 @@ class FillerCompressor:
             new_messages: list[Message] = []
             for message in request.messages:
                 if message.raw is not None:
-                    new_messages.append(message)  # structured content: preserve verbatim
+                    # Structured content: strip fillers from text blocks; other blocks verbatim.
+                    new_raw, block_touched = _strip_text_blocks(message.raw, self._fillers)
+                    touched += block_touched
+                    if new_raw is message.raw:
+                        new_messages.append(message)
+                    else:
+                        new_messages.append(Message(role=message.role, spans=(), raw=new_raw))
                     continue
                 new_spans: list[Span] = []
                 for span in message.spans:
@@ -175,3 +182,32 @@ class FillerCompressor:
         except Exception:
             # Fail open: never break the request path to save tokens.
             return request, ()
+
+
+def _strip_text_blocks(raw: dict[str, Any], fillers: frozenset[str]) -> tuple[dict[str, Any], int]:
+    """Strip fillers from the ``text`` blocks of a structured message; other blocks stay verbatim.
+
+    Only ``{"type": "text", "text": <str>, ...}`` blocks are touched (code-fence-aware via
+    :func:`strip_fillers`); every other block (tool_use/tool_result/image) is reproduced verbatim.
+    Returns the message dict — the same object when its content isn't a block list or nothing
+    changed — and the number of text blocks altered.
+    """
+    content = raw.get("content")
+    if not isinstance(content, list):
+        return raw, 0
+    touched = 0
+    new_content: list[Any] = []
+    for block in content:
+        if (
+            isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
+        ):
+            stripped = strip_fillers(block["text"], fillers)
+            if stripped != block["text"]:
+                touched += 1
+                block = {**block, "text": stripped}
+        new_content.append(block)
+    if touched == 0:
+        return raw, 0
+    return {**raw, "content": new_content}, touched
