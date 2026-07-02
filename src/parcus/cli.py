@@ -31,6 +31,7 @@ from parcus.compress import (
 )
 from parcus.config import Settings
 from parcus.eval import (
+    BUILTIN_ELISION_SAMPLES,
     BUILTIN_JUDGED_SAMPLES,
     BUILTIN_RETRIEVAL_SAMPLES,
     BUILTIN_SAMPLES,
@@ -38,6 +39,7 @@ from parcus.eval import (
     KeywordRecallJudge,
     evaluate,
     evaluate_judged,
+    evaluate_judged_elision,
     evaluate_retrieval,
     evaluate_similarity,
     is_filler_equivalent,
@@ -242,6 +244,12 @@ def _parser() -> argparse.ArgumentParser:
         "corpus, not just the structural invariant — e.g. validate an aggressive filler set.",
     )
     ev.add_argument(
+        "--elision",
+        action="store_true",
+        help="Answer-preservation gate for tool-result elision (M1d slice 3): confirm stale "
+        "tool_result payloads are dropped while recent answer-relevant content survives.",
+    )
+    ev.add_argument(
         "--learned",
         action="store_true",
         help="Answer-preservation gate for the Tier-2 learned compressor; skips (CI-safe, exit 0) "
@@ -319,6 +327,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.record:
                 _record_eval("similarity", sim_report.precision, sim_report.passed)
             return 0 if sim_report.passed else 1
+        if args.elision:
+            return _eval_elision(args.record)
         if args.learned:
             return _eval_learned(args.record)
         if args.judged:
@@ -408,6 +418,21 @@ def _eval_judged(filler: bool, aggressive: bool, record: bool) -> int:
     if record:
         kind = "judged-aggressive" if aggressive else "judged"
         _record_eval(kind, report.mean_score, report.passed)
+    return 0 if report.passed else 1
+
+
+def _eval_elision(record: bool) -> int:
+    """Answer-preservation gate for tool-result elision — CI-safe, model-free.
+
+    Confirms that eliding stale ``tool_result`` payloads (keep_recent=4, the shipping default)
+    drops the stale content while the recent answer-relevant facts survive on the built-in corpus.
+    """
+    report = evaluate_judged_elision(
+        BUILTIN_ELISION_SAMPLES, ToolResultElider(keep_recent=4), KeywordRecallJudge()
+    )
+    print(report.render())
+    if record:
+        _record_eval("elision", report.mean_score, report.passed)
     return 0 if report.passed else 1
 
 
