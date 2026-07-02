@@ -119,3 +119,35 @@ class TestEngineSummarizeMode:
         assert "Conversation summary so far" in sent["messages"][0]["content"]
         assert "earlier decision" in sent["messages"][0]["content"]
         assert result.meta["tokens_after"] < result.meta["tokens_before"]
+
+    def test_summarize_mode_compacts_on_the_stream_path(self) -> None:
+        # M1c: streaming requests run the same canonicalize -> memory -> compress pipeline as the
+        # buffered path (via prepare_stream), so Track C compaction applies to streams too.
+        up = FakeUpstream()
+        engine = ProxyEngine(
+            upstream=up,
+            compressor=LosslessCompressor(),
+            cache=NullCache(),
+            redactor=Redactor(),
+            policy=CachePolicy(),
+            config=EngineConfig(
+                anthropic_upstream="https://a.test",
+                openai_upstream="https://o.test",
+                cache_enabled=False,
+                memory_enabled=True,
+                memory_summarize=True,
+                memory_min_messages=8,
+                memory_keep_recent=4,
+            ),
+            memory=FakeMemory(),
+            summarizer=FakeSummarizer("- earlier decision"),
+        )
+        plan = engine.prepare_stream(
+            Dialect.ANTHROPIC, "/v1/messages", [("x-api-key", "k")], _long_anthropic()
+        )
+        assert plan.early is None  # forwarded, not an early error
+        sent = json.loads(plan.out_body)  # the compressed/compacted body we forward
+        assert plan.meta["memory"] == "summary"
+        assert len(sent["messages"]) < 12
+        assert "Conversation summary so far" in sent["messages"][0]["content"]
+        assert plan.meta["tokens_after"] < plan.meta["tokens_before"]
