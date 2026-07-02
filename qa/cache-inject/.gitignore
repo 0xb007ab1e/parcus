@@ -1,0 +1,4 @@
+# Local run artifacts (this harness writes nothing by default; guard against redirects).
+*.out
+*.log
+results.*
