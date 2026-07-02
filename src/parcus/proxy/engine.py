@@ -10,6 +10,7 @@ changes a result to save tokens.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import math
 import time
@@ -19,6 +20,7 @@ from typing import Any
 
 from parcus.cache.key import compute_key
 from parcus.cache.policy import CachePolicy
+from parcus.cache.seen import PrefixSeenSet
 from parcus.cache.similarity import SimilarityCache
 from parcus.cache.strategy import cache_strategy
 from parcus.memory.compaction import compact_by_summary, compact_with_memory
@@ -63,6 +65,10 @@ class EngineConfig:
         cache_inject: Whether to inject a provider prompt-cache breakpoint on a large stable
             prefix (M1b). Off by default; only explicit-breakpoint providers (Anthropic) act on
             it, and only when the prefix meets the provider's ``min_prefix_tokens``.
+        cache_inject_repeat_aware: When injecting, require the prefix to have been **seen before**
+            (within the provider cache window) so the ~1.25x cache-write premium is only paid when
+            a repeat — and thus a ~0.1x cache-read — is likely (never-cost-more; issue #56). Default
+            on; set off for unconditional "always inject" on the first sighting.
     """
 
     anthropic_upstream: str
@@ -71,6 +77,7 @@ class EngineConfig:
     cache_ttl_seconds: int = 86_400
     salt: str = ""
     cache_inject: bool = False
+    cache_inject_repeat_aware: bool = True
     # Graph memory (off by default). ingest builds the graph; inject (Track B) compacts via
     # retrieval; summarize (Track C) replaces older turns with a rolling summary.
     memory_enabled: bool = False
@@ -134,6 +141,7 @@ class ProxyEngine:
         similarity: SimilarityCache | None = None,
         tokenizer: TokenizerPort | None = None,
         summarizer: Summarizer | None = None,
+        prefix_seen: PrefixSeenSet | None = None,
     ) -> None:
         """Inject the upstream adapter, optimization components, config, metrics, and memory.
 
@@ -153,6 +161,7 @@ class ProxyEngine:
         self._similarity = similarity
         self._tokenizer = tokenizer or default_tokenizer()
         self._summarizer = summarizer or ExtractiveSummarizer()
+        self._prefix_seen = prefix_seen or PrefixSeenSet()
 
     def route(self, dialect: Dialect, headers: list[tuple[str, str]]) -> str | None:
         """Return the upstream base URL for a request, or ``None`` if it cannot be routed."""
@@ -235,10 +244,11 @@ class ProxyEngine:
         canonical = self._canonicalize(dialect, body)
         if canonical is not None:
             working, memory_action = self._apply_memory(canonical, tenant)
-            out_body, compressed, comp_stats = self._compress_request(working, body)
+            out_body, compressed, comp_stats = self._compress_request(working, body, tenant)
             meta["tokens_before"] = self._safe_count(canonical.text, canonical.model)
             meta["tokens_after"] = self._safe_count(compressed.text, compressed.model)
             meta["memory"] = memory_action
+            meta["inject"] = "on" if compressed.cache_breakpoint is not None else "off"
             compacted = working is not canonical
             meta["stages"] = self._stage_stats(canonical, working, compacted, comp_stats)
         return StreamPlan(
@@ -322,10 +332,11 @@ class ProxyEngine:
         canonical = self._canonicalize(dialect, body)
         if canonical is not None:
             working, memory_action = self._apply_memory(canonical, tenant)
-            out_body, compressed, comp_stats = self._compress_request(working, body)
+            out_body, compressed, comp_stats = self._compress_request(working, body, tenant)
             meta["tokens_before"] = self._safe_count(canonical.text, canonical.model)
             meta["tokens_after"] = self._safe_count(compressed.text, compressed.model)
             meta["memory"] = memory_action
+            meta["inject"] = "on" if compressed.cache_breakpoint is not None else "off"
             compacted = working is not canonical
             meta["stages"] = self._stage_stats(canonical, working, compacted, comp_stats)
             # Compacted bodies depend on evolving memory state, so they are not cached.
@@ -444,7 +455,7 @@ class ProxyEngine:
         return compacted, "compact" if compacted is not canonical else "ingest"
 
     def _compress_request(
-        self, working: CanonicalRequest, original: bytes
+        self, working: CanonicalRequest, original: bytes, tenant: str = ""
     ) -> tuple[bytes, CanonicalRequest, tuple[CompressionStats, ...]]:
         """Compress + re-serialise ``working`` to outbound bytes (fail open to the original).
 
@@ -470,14 +481,16 @@ class ProxyEngine:
             # provider serves it from its cache next turn. Applied to whichever request we forward;
             # a no-op unless enabled and the provider/prefix qualify. Injection changes only the
             # cache_breakpoint marker, not the text, so the token metrics above are unaffected.
-            chosen = self._inject_cache_breakpoint(chosen)
+            chosen = self._inject_cache_breakpoint(chosen, tenant)
             encoded = json.dumps(serialize(chosen, decoded), ensure_ascii=False)
             return encoded.encode("utf-8"), chosen, chosen_stats
         except Exception:
             # Fail open: forward the original body unchanged; report no token delta.
             return original, working, ()
 
-    def _inject_cache_breakpoint(self, request: CanonicalRequest) -> CanonicalRequest:
+    def _inject_cache_breakpoint(
+        self, request: CanonicalRequest, tenant: str = ""
+    ) -> CanonicalRequest:
         """Mark a provider cache breakpoint on a qualifying stable prefix, else return unchanged.
 
         Gated (fail open): only when :attr:`EngineConfig.cache_inject` is on, the dialect's
@@ -485,6 +498,10 @@ class ProxyEngine:
         the protected turns) meets the provider's ``min_prefix_tokens`` — measured with the engine's
         tokenizer, which the pure strategy deliberately doesn't have. Below the minimum a breakpoint
         would not cache anyway, so injecting only adds block-list overhead; skip it.
+
+        When ``cache_inject_repeat_aware`` is set, additionally require the prefix to have been seen
+        before (per tenant, within the provider cache window) so the ~1.25x cache-write premium is
+        only paid when a ~0.1x read is likely — never-cost-more in expectation (issue #56).
         """
         if not self._config.cache_inject:
             return request
@@ -500,6 +517,10 @@ class ProxyEngine:
             prefix += "".join(m.text for m in request.messages[:boundary])
             if self._safe_count(prefix, request.model) < capability.min_prefix_tokens:
                 return request
+            if self._config.cache_inject_repeat_aware:
+                digest = hashlib.sha256(f"{self._config.salt}\x00{prefix}".encode()).hexdigest()
+                if not self._prefix_seen.record_and_check(digest, tenant=tenant):
+                    return request  # first sighting — don't pay the cache-write premium yet
             return strategy.annotate(request)
         except Exception:
             return request
