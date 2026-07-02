@@ -14,12 +14,15 @@ from parcus.eval.equivalence import (
     lossless_violations,
 )
 from parcus.eval.judged import (
+    BUILTIN_DEDUP_SAMPLES,
     BUILTIN_ELISION_SAMPLES,
     BUILTIN_JUDGED_SAMPLES,
+    JudgedDedupSample,
     JudgedElisionSample,
     JudgedReport,
     JudgedSample,
     evaluate_judged,
+    evaluate_judged_dedup,
     evaluate_judged_elision,
 )
 from parcus.eval.metrics import EvalReport, SampleResult
@@ -40,12 +43,14 @@ from parcus.eval.similarity import (
 )
 
 __all__ = [
+    "BUILTIN_DEDUP_SAMPLES",
     "BUILTIN_ELISION_SAMPLES",
     "BUILTIN_JUDGED_SAMPLES",
     "BUILTIN_RETRIEVAL_SAMPLES",
     "BUILTIN_SAMPLES",
     "BUILTIN_SIMILARITY_SAMPLES",
     "EvalReport",
+    "JudgedDedupSample",
     "JudgedElisionSample",
     "JudgedReport",
     "JudgedSample",
@@ -61,6 +66,7 @@ __all__ = [
     "SimilaritySample",
     "evaluate",
     "evaluate_judged",
+    "evaluate_judged_dedup",
     "evaluate_judged_elision",
     "evaluate_retrieval",
     "evaluate_similarity",

@@ -32,6 +32,7 @@ from parcus.compress import (
 )
 from parcus.config import Settings
 from parcus.eval import (
+    BUILTIN_DEDUP_SAMPLES,
     BUILTIN_ELISION_SAMPLES,
     BUILTIN_JUDGED_SAMPLES,
     BUILTIN_RETRIEVAL_SAMPLES,
@@ -40,6 +41,7 @@ from parcus.eval import (
     KeywordRecallJudge,
     evaluate,
     evaluate_judged,
+    evaluate_judged_dedup,
     evaluate_judged_elision,
     evaluate_retrieval,
     evaluate_similarity,
@@ -254,6 +256,12 @@ def _parser() -> argparse.ArgumentParser:
         "tool_result payloads are dropped while recent answer-relevant content survives.",
     )
     ev.add_argument(
+        "--dedup",
+        action="store_true",
+        help="Answer-preservation gate for cross-turn dedup (Tier-2): confirm a repeated block is "
+        "collapsed while the answer-relevant content in the kept first copy survives.",
+    )
+    ev.add_argument(
         "--learned",
         action="store_true",
         help="Answer-preservation gate for the Tier-2 learned compressor; skips (CI-safe, exit 0) "
@@ -331,6 +339,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.record:
                 _record_eval("similarity", sim_report.precision, sim_report.passed)
             return 0 if sim_report.passed else 1
+        if args.dedup:
+            return _eval_dedup(args.record)
         if args.elision:
             return _eval_elision(args.record)
         if args.learned:
@@ -422,6 +432,19 @@ def _eval_judged(filler: bool, aggressive: bool, record: bool) -> int:
     if record:
         kind = "judged-aggressive" if aggressive else "judged"
         _record_eval(kind, report.mean_score, report.passed)
+    return 0 if report.passed else 1
+
+
+def _eval_dedup(record: bool) -> int:
+    """Answer-preservation gate for cross-turn dedup — CI-safe, model-free.
+
+    Confirms that collapsing a repeated block to a reference keeps the answer-relevant content (in
+    the kept first copy) on the built-in corpus, and that a duplicate was actually deduplicated.
+    """
+    report = evaluate_judged_dedup(BUILTIN_DEDUP_SAMPLES, DedupCompressor(), KeywordRecallJudge())
+    print(report.render())
+    if record:
+        _record_eval("dedup", report.mean_score, report.passed)
     return 0 if report.passed else 1
 
 

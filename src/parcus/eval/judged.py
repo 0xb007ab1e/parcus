@@ -24,13 +24,16 @@ from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
 from parcus.ports import CompressorPort
 
 __all__ = [
+    "BUILTIN_DEDUP_SAMPLES",
     "BUILTIN_ELISION_SAMPLES",
     "BUILTIN_JUDGED_SAMPLES",
     "JudgedCase",
+    "JudgedDedupSample",
     "JudgedElisionSample",
     "JudgedReport",
     "JudgedSample",
     "evaluate_judged",
+    "evaluate_judged_dedup",
     "evaluate_judged_elision",
 ]
 
@@ -241,6 +244,85 @@ BUILTIN_ELISION_SAMPLES: tuple[JudgedElisionSample, ...] = (
         ),
         must_include=("300 seconds", "fail open"),
         must_drop=("deprecated feature flags",),
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class JudgedDedupSample:
+    """A conversation with a repeated block; dedup must fire yet keep the answer-relevant content.
+
+    Args:
+        name: Identifier.
+        request: A request containing the same large block in more than one turn.
+        must_include: Answer-relevant phrases (present in the kept first copy) that must survive.
+    """
+
+    name: str
+    request: CanonicalRequest
+    must_include: tuple[str, ...]
+
+
+def evaluate_judged_dedup(
+    samples: Iterable[JudgedDedupSample],
+    deduper: CompressorPort,
+    judge: QualityJudge | None = None,
+) -> JudgedReport:
+    """Dedup each sample and judge that the content survives *and* a duplicate was collapsed.
+
+    A case passes only if the recall judge finds every ``must_include`` phrase (preserved in the
+    first, kept copy) **and** the deduper reported at least one collapsed block — so the gate can't
+    pass vacuously on a sample where nothing was deduplicated. Model-free / CI-safe (injected).
+    """
+    judge = judge or KeywordRecallJudge()
+    cases: list[JudgedCase] = []
+    for sample in samples:
+        compressed, stats = deduper.compress(sample.request)
+        text = compressed.text
+        verdict = judge.judge(text, sample.must_include)
+        deduped = bool(stats) and stats[0].spans_touched > 0
+        cases.append(
+            JudgedCase(
+                name=sample.name,
+                score=verdict.score,
+                passed=verdict.passed and deduped,
+                compressed=text,
+            )
+        )
+    return JudgedReport(cases=tuple(cases))
+
+
+# A block (over the dedup min) whose answer-relevant facts must survive when a later copy is
+# collapsed to a reference.
+_REPEATED_BLOCK = (
+    "PROJECT CONFIG: the service runs 10 replicas with a 30 second timeout. "
+    + "supporting configuration detail line that pads the block; " * 30
+)
+
+# Conversations that paste the same block twice across turns → the later copy must be deduped while
+# the first copy (carrying the answer) survives.
+BUILTIN_DEDUP_SAMPLES: tuple[JudgedDedupSample, ...] = (
+    JudgedDedupSample(
+        name="dedup-repeated-config",
+        request=CanonicalRequest(
+            dialect=Dialect.ANTHROPIC,
+            model="eval",
+            messages=(
+                Message(
+                    role=Role.USER, spans=(Span("Here is the config:\n"), Span(_REPEATED_BLOCK))
+                ),
+                Message(role=Role.ASSISTANT, spans=(Span("Got it.", mutable=True),)),
+                Message(
+                    role=Role.USER,
+                    spans=(
+                        Span("For reference, the same config again:\n"),
+                        Span(_REPEATED_BLOCK),
+                        Span("\nHow many replicas are we running?"),
+                    ),
+                ),
+            ),
+        ),
+        must_include=("10 replicas", "30 second"),
     ),
 )
 
