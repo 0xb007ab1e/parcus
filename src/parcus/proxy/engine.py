@@ -522,12 +522,14 @@ class ProxyEngine:
         """
         if not self._config.cache_inject:
             return request
-        if any(m.raw is not None for m in request.messages):
-            return request  # structured content: injection over blocks is deferred (M1d slice 2)
         try:
             strategy = cache_strategy(request.dialect)
             capability = strategy.capability
             if capability.model is not CacheModel.EXPLICIT_BREAKPOINT:
+                return request
+            if _has_cache_control(request):
+                # The harness already manages prompt caching — preserve it, don't add breakpoints
+                # (avoids fighting its cache / exceeding the 4-breakpoint cap). M1a preservation.
                 return request
             boundary = strategy.cacheable_boundary(request)
             if boundary is None or boundary < 1:
@@ -643,6 +645,23 @@ class ProxyEngine:
     @staticmethod
     def _response_headers(headers: tuple[tuple[str, str], ...]) -> list[tuple[str, str]]:
         return [(k, v) for k, v in headers if k.lower() not in _DROP_RESPONSE_HEADERS]
+
+
+def _has_cache_control(request: CanonicalRequest) -> bool:
+    """Return whether the request already carries a ``cache_control`` breakpoint.
+
+    Only structured (``raw``) messages can — a plain-text message's content is a string. Used to
+    leave a harness that manages its own prompt caching untouched (don't inject a competing marker).
+    """
+    for message in request.messages:
+        if message.raw is None:
+            continue
+        content = message.raw.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and "cache_control" in block:
+                    return True
+    return False
 
 
 def _content_type(headers: tuple[tuple[str, str], ...]) -> str | None:
