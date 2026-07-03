@@ -100,8 +100,13 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
         passes.append(FillerCompressor(fillers=fillers, verify_sample=rate))
     if settings.learned:
         # Local LLMLingua reducer; model loads lazily on first use (the 'learned' extra). Last
-        # in the chain — operate on already-losslessly/filler-trimmed prose.
-        passes.append(LearnedCompressor(LLMLinguaReducer(), keep_ratio=settings.learned_ratio))
+        # in the chain — operate on already-losslessly/filler-trimmed prose. The LLMLingua-2
+        # backend is opt-in (higher fidelity; validate offline first).
+        reducer = LLMLinguaReducer(
+            model_name=settings.learned_model or None,
+            use_llmlingua2=settings.learned_llmlingua2,
+        )
+        passes.append(LearnedCompressor(reducer, keep_ratio=settings.learned_ratio))
     if settings.elide_tool_results:
         # Lossy: stub stale tool_result payloads in structured turns (needs parse_structured).
         passes.append(ToolResultElider(keep_recent=settings.elide_keep_recent))
@@ -470,11 +475,15 @@ def _eval_learned(record: bool) -> int:
     with exit 0 rather than failing the gate. The model path is exercised offline. The gate logic
     itself (``evaluate_judged`` + the recall judge) is covered in CI via a fake reducer.
     """
-    reducer = LLMLinguaReducer(model_name=os.environ.get("PARCUS_LEARNED_MODEL", "gpt2"))
+    use_llmlingua2 = os.environ.get("PARCUS_LEARNED_LLMLINGUA2", "").lower() in ("1", "true", "yes")
+    reducer = LLMLinguaReducer(
+        model_name=os.environ.get("PARCUS_LEARNED_MODEL") or None,
+        use_llmlingua2=use_llmlingua2,
+    )
     try:
         reducer.reduce("a short probe prompt", keep_ratio=0.5)
     except Exception:
-        print("parcus eval --learned: skipped (local LLMLingua model unavailable)")
+        print(f"parcus eval --learned: skipped ({reducer.model_name} unavailable)")
         return 0
     learned = ChainCompressor(  # pragma: no cover - only when a local model is present
         [
