@@ -111,13 +111,9 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
         fillers = AGGRESSIVE_FILLERS if settings.filler_aggressive else DEFAULT_FILLERS
         passes.append(FillerCompressor(fillers=fillers, verify_sample=rate))
     if settings.learned:
-        # Local LLMLingua reducer; model loads lazily on first use (the 'learned' extra). Last
-        # in the chain — operate on already-losslessly/filler-trimmed prose. The LLMLingua-2
-        # backend is opt-in (higher fidelity; validate offline first).
-        reducer = LLMLinguaReducer(
-            model_name=settings.learned_model or None,
-            use_llmlingua2=settings.learned_llmlingua2,
-        )
+        # Local LLMLingua (v1) reducer; model loads lazily on first use (the 'learned' extra).
+        # Last in the chain — operate on already-losslessly/filler-trimmed prose.
+        reducer = LLMLinguaReducer(model_name=settings.learned_model or None)
         passes.append(LearnedCompressor(reducer, keep_ratio=settings.learned_ratio))
     if settings.elide_tool_results:
         # Lossy: stub stale tool_result payloads in structured turns (needs parse_structured).
@@ -563,11 +559,7 @@ def _eval_learned(record: bool, sweep: str | None = None) -> int:
     except ValueError as exc:
         print(f"parcus eval --learned: invalid --sweep: {exc}")
         return 2
-    use_llmlingua2 = os.environ.get("PARCUS_LEARNED_LLMLINGUA2", "").lower() in ("1", "true", "yes")
-    reducer = LLMLinguaReducer(
-        model_name=os.environ.get("PARCUS_LEARNED_MODEL") or None,
-        use_llmlingua2=use_llmlingua2,
-    )
+    reducer = LLMLinguaReducer(model_name=os.environ.get("PARCUS_LEARNED_MODEL") or None)
     try:
         reducer.reduce("a short probe prompt", keep_ratio=0.5)
     except Exception:

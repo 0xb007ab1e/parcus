@@ -55,8 +55,7 @@ class Settings(BaseSettings):
     filler_aggressive: bool = False  # use the larger AGGRESSIVE_FILLERS set (validate offline)
     learned: bool = False  # Tier-2 local learned compressor (opt-in; needs the 'learned' extra)
     learned_ratio: float = 0.5  # target fraction of prose tokens to keep
-    learned_llmlingua2: bool = False  # use the LLMLingua-2 backend (validate offline before use)
-    learned_model: str = ""  # override the local model; empty = the backend's default
+    learned_model: str = ""  # override the local LLMLingua (v1) model; empty = gpt2 default
 
     cache: bool = True
     cache_ttl_seconds: int = 86_400

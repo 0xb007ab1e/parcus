@@ -226,8 +226,7 @@ def test_learned_disabled_by_default() -> None:
     s = Settings(_env_file=None)
     assert s.learned is False
     assert s.learned_ratio == 0.5
-    assert s.learned_llmlingua2 is False  # conservative v1 backend until validated
-    assert s.learned_model == ""  # empty = backend default
+    assert s.learned_model == ""  # empty = gpt2 default
 
 
 def test_learned_ratio_out_of_range_rejected() -> None:

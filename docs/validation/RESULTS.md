@@ -222,14 +222,18 @@ for enabling `dedup`.
 
 _Gate run 2026-07-02 (`parcus eval --dedup`), `DedupCompressor(min_chars=200)`, keyword-recall judge._
 
-# Tier-2 learned — LLMLingua-2 backend (answer-preservation gate)
+# Tier-2 learned — LLMLingua-2 backend (evaluated and REMOVED)
 
-The Tier-2 learned compressor now supports the **LLMLingua-2** local backend
-(`use_llmlingua2=True` / `learned_llmlingua2`) alongside the incumbent LLMLingua v1 (`gpt2`,
-perplexity-based). v2 is a token-classification model — faster and higher-fidelity in the
-literature — and force-retains punctuation/newlines so structure survives. It is **opt-in and OFF
-by default**; per the project ethos (correctness is the gate, tokens are the objective) it must
-clear the offline answer-preservation gate before an operator enables it.
+> **Outcome (2026-07-03): the LLMLingua-2 backend was evaluated, found non-viable, and removed
+> from the code.** This section is kept as the record of *why* (the finding has value; the code
+> did not). The learned tier ships **v1 (`gpt2`) only**. The measurements below stand as run.
+
+The backend was a selectable **LLMLingua-2** local reducer (a token-classification model — faster
+and higher-fidelity in the literature — force-retaining punctuation/newlines) alongside the
+incumbent LLMLingua v1 (`gpt2`, perplexity-based). Per the project ethos (correctness is the gate,
+tokens are the objective) it had to clear the offline answer-preservation gate before use. It
+never did — the reasons below are structural, not a tuning miss, so it was cut rather than carried
+as dead, off-by-default weight.
 
 Gate: `PARCUS_LEARNED_LLMLINGUA2=1 parcus eval --learned --sweep <ratios>` runs the chain
 (lossless → aggressive-filler → `LearnedCompressor(LLMLinguaReducer(use_llmlingua2=True), keep_ratio=r)`)
@@ -309,12 +313,24 @@ meaning/format we don't have to" ethos disfavours. v1/`gpt2` remains the shippin
 
 **Honest scope:** the 88% ceiling is partly a **measurement artifact** (exact-substring recall vs
 v2's re-spacing), not pure information loss — but the punctuation mutation it exposes is itself a
-real reason to keep v2 off. Not pursued further; a whitespace-normalising post-process on v2 output
-(and/or unit-aware `force_tokens`) is a possible future thread, tracked but not built.
+real reason to keep v2 off.
 
-_Experiment run 2026-07-03 (`PARCUS_LEARNED_LLMLINGUA2=1 parcus eval --learned --sweep …` with
-`force_reserve_digit` on), plus a direct v2-output probe on the two failing prompts. The knob was
-removed after measuring no effect._
+## Final decision — the backend was cut
+
+After the sweep (dead end) and the digit experiment (no effect), the backend was **removed
+entirely**. The two redemption paths both fail the value test: (a) a whitespace-normalising
+post-process only recovers the artifact-driven failure and, even then, leaves v2 delivering
+~10% compression at keep-ratio 0.9 — *less* than the shipped Tier-0/1 tiers get losslessly, while
+carrying torch + a BERT model; (b) the "long-prose/RAG" niche where v2 might win overlaps what
+elision + lossless already cover and would need a whole new corpus to validate speculatively. The
+fundamental trait — **v2 mutates the prose's punctuation/spacing** — is a poor fit for a
+preservation-focused proxy regardless of corpus. So we keep the *finding* (this record) and drop
+the *code*: the learned tier ships **v1 (`gpt2`) only**; `learned_model` still overrides the local
+model and `parcus eval --learned --sweep` still works for v1. Git history preserves the backend if
+the long-prose thread is ever funded.
+
+_Experiments run 2026-07-03 (keep-ratio sweep, then `force_reserve_digit`), plus a direct v2-output
+probe on the failing prompts. Backend removed 2026-07-03 after the study concluded negative._
 
 # Semantic (similarity) cache — local embedder precision gate (PASSED)
 
