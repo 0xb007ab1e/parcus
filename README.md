@@ -196,6 +196,22 @@ make lint      # ruff + mypy + bandit
 make check     # everything CI runs
 ```
 
+### Optional: codebase-memory index
+
+parcus can be indexed into a codebase-memory knowledge graph (an MCP server) for structural code
+navigation (who-calls-what, dead-code, impact tracing). This is an **optional dev aid** — it is
+**not** a dependency of parcus and is not needed to build, test, or run the project.
+
+If you have the codebase-memory MCP server installed, build a local graph with one command:
+
+```bash
+/codebase-memory index      # via Claude Code, with the MCP server connected
+```
+
+The generated index lives in `.codebase-memory/` and is **git-ignored** (a ~1.4 MB binary that
+changes on every re-index — regenerate it locally rather than vendoring it). Contributors without
+the MCP server can ignore this section entirely.
+
 ## License
 
 [MIT](https://github.com/0xb007ab1e/parcus/blob/main/LICENSE).
