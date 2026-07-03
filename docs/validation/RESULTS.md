@@ -231,33 +231,42 @@ literature — and force-retains punctuation/newlines so structure survives. It 
 by default**; per the project ethos (correctness is the gate, tokens are the objective) it must
 clear the offline answer-preservation gate before an operator enables it.
 
-Gate: `PARCUS_LEARNED_LLMLINGUA2=1 parcus eval --learned` runs the chain
-(lossless → aggressive-filler → `LearnedCompressor(LLMLinguaReducer(use_llmlingua2=True), keep_ratio=0.5)`)
-over the builtin judged corpus with the deterministic keyword-recall judge.
+Gate: `PARCUS_LEARNED_LLMLINGUA2=1 parcus eval --learned --sweep <ratios>` runs the chain
+(lossless → aggressive-filler → `LearnedCompressor(LLMLinguaReducer(use_llmlingua2=True), keep_ratio=r)`)
+over the builtin judged corpus with the deterministic keyword-recall judge, at each keep-ratio, and
+reports the lowest ratio that clears the bar.
+
+## Keep-ratio sweep (the decisive result)
 
 ```
-case                          recall    ok
---------------------------------------------
-scale-replicas                 100%    ok
-caching-tradeoff                50%  FAIL
-timeout-budget                  67%  FAIL
-define-idempotent              100%    ok
---------------------------------------------
-mean                            79%  FAIL
+keep_ratio  mean recall  verdict
+--------------------------------
+      0.30          25%     FAIL
+      0.50          79%     FAIL
+      0.70          88%     FAIL
+      0.90          88%     FAIL
+      0.95          88%     FAIL
+      0.99          88%     FAIL
+no keep_ratio cleared the answer-preservation bar
 ```
 
-**Finding — does NOT pass at `keep_ratio=0.5`.** At the default target ratio, v2's aggressive
-pruning drops answer-relevant tokens on two of four cases (a caching trade-off number and a timeout
-budget), landing at 79% mean recall — below the gate's bar. This is exactly the "validate offline
-before enabling" caveat firing: the backend is wired and selectable, but **stays off** until it
-clears the gate. Next steps before enabling: raise `keep_ratio` (less aggressive), expand
-`force_tokens` to protect numerics/units, and/or grow the judged corpus so the number is
-representative.
+**Finding — v2 hits a hard 88% ceiling; no keep-ratio passes.** Recall rises with `keep_ratio` up
+to 0.70 and then **plateaus at 88% all the way to 0.99** — i.e. even keeping ~all tokens, the v2
+token-classifier still drops an answer-relevant token on one case. So the problem is **not**
+compression aggressiveness (the obvious lever), and raising `keep_ratio` cannot fix it: the ceiling
+is structural to v2's token selection with punctuation-only `force_tokens`. The caching-tradeoff /
+timeout-budget cases lose **numeric/unit** tokens that punctuation retention doesn't protect.
 
-**Honest scope:** model-free, CI-safe structural gate (keyword recall over a small corpus), not
-end-to-end production quality — but sufficient to establish that v2-at-0.5 is a **regression** vs.
-the answer-preservation bar and therefore not ready to ship on.
+**Decision — v2 stays OFF; keep-ratio is a dead end.** The remaining levers are (a) expand
+`force_tokens` to protect numerics/units (the specific tokens v2 drops), or (b) treat v2 as
+unsuitable for this correctness-sensitive traffic and keep v1. Not a keep-ratio problem — the sweep
+proved that conclusively. v1/`gpt2` remains the shipping default (CPU-bound, minutes per run; not
+re-benchmarked this pass).
 
-_Gate run 2026-07-03 (`PARCUS_LEARNED_LLMLINGUA2=1 parcus eval --learned`),
-`LLMLinguaReducer(use_llmlingua2=True)` @ `keep_ratio=0.5`, keyword-recall judge. v1/`gpt2` not
-re-benchmarked this pass (CPU-bound, minutes per run); it remains the shipping default._
+**Honest scope:** model-free, CI-safe structural gate (keyword recall over a small 4-case corpus),
+not end-to-end production quality — but decisive on the narrow question the sweep asked: *is there a
+keep-ratio at which v2 stops regressing answers?* Answer: **no.**
+
+_Sweep run 2026-07-03 (`PARCUS_LEARNED_LLMLINGUA2=1 parcus eval --learned --sweep 0.3,0.5,0.7,0.9`
+then `--sweep 0.95,0.99`), `LLMLinguaReducer(use_llmlingua2=True)`, punctuation `force_tokens`,
+keyword-recall judge._

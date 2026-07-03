@@ -75,6 +75,9 @@ from parcus.tenant import derive_tenant
 
 __all__ = ["build_app", "build_engine", "main"]
 
+# Default keep-ratio sweep for `eval --learned --sweep` (bare flag): coarse-to-fine, all in (0, 1].
+_DEFAULT_SWEEP_RATIOS = "0.3,0.5,0.7,0.9"
+
 
 def _build_metrics(settings: Settings) -> tuple[MetricsSink, SqliteMetricsSink | None]:
     """Return the engine's metrics sink and the persistent store (if metrics are enabled).
@@ -273,6 +276,16 @@ def _parser() -> argparse.ArgumentParser:
         "when the local model / 'learned' extra is unavailable.",
     )
     ev.add_argument(
+        "--sweep",
+        nargs="?",
+        const=_DEFAULT_SWEEP_RATIOS,
+        default=None,
+        metavar="RATIOS",
+        help="With --learned: sweep the gate over a comma-separated list of keep-ratios "
+        f"(default '{_DEFAULT_SWEEP_RATIOS}' when the flag is bare) and report the lowest ratio "
+        "that still clears the answer-preservation bar. Exit 0 if any ratio passes.",
+    )
+    ev.add_argument(
         "--retrieval",
         action="store_true",
         help="Run the memory retrieval-quality gate (recall) instead of compression eval.",
@@ -349,7 +362,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.elision:
             return _eval_elision(args.record)
         if args.learned:
-            return _eval_learned(args.record)
+            return _eval_learned(args.record, sweep=args.sweep)
         if args.judged:
             return _eval_judged(args.filler, args.aggressive, args.record)
         samples = load_jsonl(args.dataset) if args.dataset else BUILTIN_SAMPLES
@@ -468,13 +481,53 @@ def _eval_elision(record: bool) -> int:
     return 0 if report.passed else 1
 
 
-def _eval_learned(record: bool) -> int:
+def _parse_sweep_ratios(spec: str) -> list[float]:
+    """Parse a comma-separated keep-ratio sweep spec into validated ratios in (0, 1].
+
+    Raises ``ValueError`` on non-numeric entries, out-of-range ratios, or an empty spec — so a bad
+    ``--sweep`` fails fast (before any model load) with a clear message.
+    """
+    ratios: list[float] = []
+    for part in spec.split(","):
+        stripped = part.strip()
+        if not stripped:
+            continue
+        value = float(stripped)
+        if not 0.0 < value <= 1.0:
+            raise ValueError(f"keep-ratio must be in (0.0, 1.0], got {value}")
+        ratios.append(value)
+    if not ratios:
+        raise ValueError("no keep-ratios given")
+    return ratios
+
+
+def _learned_chain(reducer: LLMLinguaReducer, keep_ratio: float) -> ChainCompressor:
+    """The shipping learned chain (lossless → aggressive filler → learned) at ``keep_ratio``."""
+    return ChainCompressor(
+        [
+            LosslessCompressor(),
+            FillerCompressor(fillers=AGGRESSIVE_FILLERS),
+            LearnedCompressor(reducer, keep_ratio=keep_ratio),
+        ]
+    )
+
+
+def _eval_learned(record: bool, sweep: str | None = None) -> int:
     """Answer-preservation gate for the Tier-2 learned compressor.
 
     Needs a local LLMLingua model; when it is unavailable (CI / no 'learned' extra) this skips
     with exit 0 rather than failing the gate. The model path is exercised offline. The gate logic
     itself (``evaluate_judged`` + the recall judge) is covered in CI via a fake reducer.
+
+    With ``sweep`` set (a comma-separated keep-ratio spec) it runs the gate at each ratio and
+    reports the lowest ratio that still clears the bar (exit 0 if any passes) — the tool for
+    finding a viable setting for a more aggressive backend (e.g. LLMLingua-2).
     """
+    try:
+        ratios = _parse_sweep_ratios(sweep) if sweep is not None else [0.5]
+    except ValueError as exc:
+        print(f"parcus eval --learned: invalid --sweep: {exc}")
+        return 2
     use_llmlingua2 = os.environ.get("PARCUS_LEARNED_LLMLINGUA2", "").lower() in ("1", "true", "yes")
     reducer = LLMLinguaReducer(
         model_name=os.environ.get("PARCUS_LEARNED_MODEL") or None,
@@ -485,20 +538,44 @@ def _eval_learned(record: bool) -> int:
     except Exception:
         print(f"parcus eval --learned: skipped ({reducer.model_name} unavailable)")
         return 0
-    learned = ChainCompressor(  # pragma: no cover - only when a local model is present
-        [
-            LosslessCompressor(),
-            FillerCompressor(fillers=AGGRESSIVE_FILLERS),
-            LearnedCompressor(reducer, keep_ratio=0.5),
-        ]
-    )
-    report = evaluate_judged(  # pragma: no cover - needs model
-        BUILTIN_JUDGED_SAMPLES, learned, KeywordRecallJudge()
-    )
-    print(report.render())  # pragma: no cover
-    if record:  # pragma: no cover
-        _record_eval("learned", report.mean_score, report.passed)
-    return 0 if report.passed else 1  # pragma: no cover
+    return _run_learned_gate(reducer, ratios, record, is_sweep=sweep is not None)
+
+
+def _run_learned_gate(  # pragma: no cover - only when a local model is present
+    reducer: LLMLinguaReducer, ratios: list[float], record: bool, *, is_sweep: bool
+) -> int:
+    """Run the judged gate at each keep-ratio; single-report for one ratio, summary for a sweep."""
+    judge = KeywordRecallJudge()
+    reports = [
+        (r, evaluate_judged(BUILTIN_JUDGED_SAMPLES, _learned_chain(reducer, r), judge))
+        for r in ratios
+    ]
+    if not is_sweep:
+        _ratio, report = reports[0]
+        print(report.render())
+        if record:
+            _record_eval("learned", report.mean_score, report.passed)
+        return 0 if report.passed else 1
+
+    lines = [f"{'keep_ratio':>10}  {'mean recall':>11}  {'verdict':>7}", "-" * 32]
+    for r, rep in reports:
+        lines.append(
+            f"{r:>10.2f}  {rep.mean_score:>11.0%}  {('PASS' if rep.passed else 'FAIL'):>7}"
+        )
+    print("\n".join(lines))
+
+    passing = [(r, rep) for r, rep in reports if rep.passed]
+    if passing:
+        best_r, best_rep = min(passing, key=lambda x: x[0])  # lowest ratio = most compression
+        print(f"best passing keep_ratio: {best_r:.2f} ({best_rep.mean_score:.0%} recall)")
+        if record:
+            _record_eval("learned-sweep", best_rep.mean_score, True)
+        return 0
+    print("no keep_ratio cleared the answer-preservation bar")
+    if record:
+        best_rep = max((rep for _r, rep in reports), key=lambda rp: rp.mean_score)
+        _record_eval("learned-sweep", best_rep.mean_score, False)
+    return 1
 
 
 if __name__ == "__main__":

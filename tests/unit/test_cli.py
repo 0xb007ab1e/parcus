@@ -292,6 +292,49 @@ def test_eval_learned_skips_when_model_unavailable(
     assert "skipped" in capsys.readouterr().out.lower()
 
 
+class TestParseSweepRatios:
+    """Keep-ratio sweep spec parsing (pure, model-free)."""
+
+    def test_parses_valid_list(self) -> None:
+        assert cli._parse_sweep_ratios("0.3,0.5,0.7,0.9") == [0.3, 0.5, 0.7, 0.9]
+
+    def test_tolerates_spaces_and_trailing_comma(self) -> None:
+        assert cli._parse_sweep_ratios(" 0.4 , 0.8 ,") == [0.4, 0.8]
+
+    def test_rejects_out_of_range(self) -> None:
+        with pytest.raises(ValueError, match="keep-ratio must be in"):
+            cli._parse_sweep_ratios("0.5,1.5")
+        with pytest.raises(ValueError, match="keep-ratio must be in"):
+            cli._parse_sweep_ratios("0,0.5")  # 0 is not in (0, 1]
+
+    def test_rejects_non_numeric(self) -> None:
+        with pytest.raises(ValueError):
+            cli._parse_sweep_ratios("0.5,abc")
+
+    def test_rejects_empty(self) -> None:
+        with pytest.raises(ValueError, match="no keep-ratios"):
+            cli._parse_sweep_ratios(" , ")
+
+
+def test_eval_learned_sweep_rejects_invalid_ratios(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A bad --sweep fails fast (exit 2) before any model load — no 'learned' extra needed.
+    rc = cli.main(["eval", "--learned", "--sweep", "0.5,2.0"])
+    assert rc == 2
+    assert "invalid --sweep" in capsys.readouterr().out.lower()
+
+
+def test_eval_learned_sweep_skips_when_model_unavailable(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Valid --sweep parses, then the model probe fails on a pinned bad model -> CI-safe skip.
+    monkeypatch.setenv("PARCUS_LEARNED_MODEL", "/nonexistent/model/path")
+    rc = cli.main(["eval", "--learned", "--sweep"])  # bare flag -> default ratios
+    assert rc == 0
+    assert "skipped" in capsys.readouterr().out.lower()
+
+
 def test_eval_learned_honours_llmlingua2_env_flag(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
