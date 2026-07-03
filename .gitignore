@@ -13,6 +13,9 @@ data/
 .parcus/
 .cache/
 
+# --- codebase-memory MCP index (optional dev aid; regenerated locally, never vendored) ---
+.codebase-memory/
+
 # --- python ---
 __pycache__/
 *.py[cod]
