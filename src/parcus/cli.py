@@ -11,10 +11,13 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import uvicorn
 from fastapi import FastAPI
+
+if TYPE_CHECKING:  # annotation only — keeps `cryptography` (the encryption extra) optional
+    from parcus.cache.encryption import CipherProvider
 
 from parcus import __version__
 from parcus.cache import (
@@ -179,15 +182,16 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
     )
 
 
-def _maybe_encrypt(cache: CachePort, settings: Settings) -> CachePort:
-    """Wrap the cache in at-rest encryption when enabled (lazy import keeps crypto optional).
+def _build_cipher_provider(settings: Settings) -> CipherProvider | None:
+    """Build the cache cipher provider from settings, or ``None`` when encryption is off.
 
-    The key is validated by settings; it is present here because enabling encryption without a
-    valid key already failed closed at settings construction.
+    Shared by the exact cache and the similarity index so both use identical keys, rotation, and
+    per-tenant DEKs / crypto-shredding. Single-tenant uses one static cipher; multi-tenant derives
+    a per-tenant DEK from the master key. Lazy import keeps ``cryptography`` optional.
     """
     if not settings.cache_encryption:
-        return cache
-    from parcus.cache.encryption import CacheCipher, EncryptedCache, TenantCipherProvider
+        return None
+    from parcus.cache.encryption import CacheCipher, StaticCipherProvider, TenantCipherProvider
 
     key = settings.cache_encryption_key_bytes()
     if key is None:  # defensive: settings validation already guarantees a key here (fail closed)
@@ -195,19 +199,30 @@ def _maybe_encrypt(cache: CachePort, settings: Settings) -> CachePort:
     previous = settings.cache_encryption_previous_key_bytes()
     if settings.multi_tenant:
         # Per-tenant DEKs derived from the master key, with crypto-shredding by withheld key.
-        provider = TenantCipherProvider(
+        return TenantCipherProvider(
             key, previous_master_keys=previous, shredded=settings.cache_shredded_tenant_set()
         )
-        return EncryptedCache(cache, provider=provider)
-    # Single-tenant: one cipher straight from the master key (unchanged behaviour).
-    return EncryptedCache(cache, CacheCipher(key, previous_keys=previous))
+    # Single-tenant: one cipher for every request (StaticCipherProvider wraps it).
+    return StaticCipherProvider(CacheCipher(key, previous_keys=previous))
+
+
+def _maybe_encrypt(cache: CachePort, settings: Settings) -> CachePort:
+    """Wrap the cache in at-rest encryption when enabled (via the shared cipher provider)."""
+    provider = _build_cipher_provider(settings)
+    if provider is None:
+        return cache
+    from parcus.cache.encryption import EncryptedCache
+
+    return EncryptedCache(cache, provider=provider)
 
 
 def _build_similarity(settings: Settings) -> SimilarityCache | None:
     """Build the opt-in semantic cache (local embedder), or ``None`` when disabled.
 
     When ``similarity_persist`` is set, back it with a confidential sidecar snapshot so
-    near-duplicate hits survive a restart (the index still operates in memory).
+    near-duplicate hits survive a restart (the index still operates in memory). When
+    ``cache_encryption`` is on, the persisted vectors are sealed with the same cipher provider as
+    the exact cache (per-tenant DEKs + crypto-shred parity) — mirroring the exact cache's posture.
     """
     if not settings.similarity_cache:
         return None
@@ -217,7 +232,9 @@ def _build_similarity(settings: Settings) -> SimilarityCache | None:
         if settings.similarity_path != ":memory:":
             Path(settings.similarity_path).parent.mkdir(parents=True, exist_ok=True)
         store = SqliteSimilarityStore(
-            settings.similarity_path, max_entries=settings.similarity_max_entries
+            settings.similarity_path,
+            max_entries=settings.similarity_max_entries,
+            provider=_build_cipher_provider(settings),
         )
     return SimilarityCache(
         embedder,

@@ -209,6 +209,46 @@ def test_build_engine_similarity_has_no_store_when_persist_off() -> None:
     assert engine._similarity._store is None
 
 
+def test_build_engine_seals_persisted_similarity_when_encryption_on() -> None:
+    # cache_encryption on -> the persisted similarity store gets the same cipher provider.
+    import base64
+
+    engine = cli.build_engine(
+        Settings(
+            _env_file=None,
+            metrics=False,
+            cache_encryption=True,
+            cache_encryption_key=base64.b64encode(b"\x07" * 32).decode(),
+            similarity_cache=True,
+            similarity_embedder="hashing",
+            similarity_allow_lexical=True,
+            similarity_persist=True,
+            similarity_path=":memory:",
+        )
+    )
+    assert engine._similarity is not None
+    assert engine._similarity._store is not None
+    assert engine._similarity._store._provider is not None  # vectors sealed at rest
+
+
+def test_build_engine_persisted_similarity_plaintext_when_encryption_off() -> None:
+    engine = cli.build_engine(
+        Settings(
+            _env_file=None,
+            cache=False,
+            metrics=False,
+            similarity_cache=True,
+            similarity_embedder="hashing",
+            similarity_allow_lexical=True,
+            similarity_persist=True,
+            similarity_path=":memory:",
+        )
+    )
+    assert engine._similarity is not None
+    assert engine._similarity._store is not None
+    assert engine._similarity._store._provider is None  # plaintext at 0600 (encryption off)
+
+
 def test_build_engine_wraps_cache_in_encryption_when_enabled() -> None:
     import base64
 

@@ -74,14 +74,17 @@ re-warmed). This amendment adds **opt-in persistence** without changing the hot 
 - **Confidential sidecar, posture mirrors the exact cache.** `SqliteSimilarityStore` is a separate
   SQLite file at `similarity_path`, created **`0600`**, storing `(vector, exact-key, model,
   tenant, created_at)` — **still never prompt text**. It persists **plaintext at `0600` when
-  `cache_encryption` is off**, exactly as `SqliteCache` persists response bodies; at-rest
-  encryption of the vector blob (via the same `CipherProvider` — per-tenant DEK, crypto-shred
-  parity) is a **follow-up slice**, not this one. We deliberately do **not** hold vectors to a
-  stricter rule than the response bodies they point to.
+  `cache_encryption` is off**, exactly as `SqliteCache` persists response bodies. When
+  `cache_encryption` is **on**, the vector blob is **sealed with the same `CipherProvider`** as the
+  exact cache (built once by `_build_cipher_provider`): AAD-bound to the entry's exact-cache key,
+  per-tenant DEKs, and **crypto-shred parity** — a shredded tenant's rows fail to open and are
+  **skipped on load** (never served), and are not persisted on write. We deliberately do **not**
+  hold vectors to a stricter rule than the response bodies they point to.
 - **Classification.** An embedding is prompt-derived **confidential** data (embedding inversion is
-  a real research area); on regulated hosts, enable `cache_encryption` (the follow-up slice seals
-  the vectors). The index file joins the exact cache as a `confidential` at-rest store in the
-  threat model.
+  a real research area); on regulated hosts, enable `cache_encryption` and the vectors are sealed
+  at rest. The index file joins the exact cache as a `confidential` at-rest store in the threat
+  model. Load decodes each row independently, so one shredded/rotated/malformed row is skipped
+  rather than sinking the whole snapshot.
 - **Fail open.** Any store error (load/append) degrades the index to **in-memory-only** — a broken
   or missing snapshot never breaks the request path.
 - **Self-healing staleness.** The snapshot may reference exact-cache keys whose responses have
