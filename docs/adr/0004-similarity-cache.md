@@ -61,3 +61,31 @@ threshold. The built-in adversarial set fails the gate with the lexical embedder
   a mandatory precision gate + an explicit warning that the default lexical embedder is unsafe.
 - Tenant isolation extends to similarity (no cross-tenant similar-serve), consistent with ADR
   0003. Future work: persistent index, and per-tenant similarity tuning.
+
+## Amendment (2026-07-03) — persistent index (snapshot-in-memory)
+
+The index was in-memory only, so it was **cold after every restart** (no near-duplicate hits until
+re-warmed). This amendment adds **opt-in persistence** without changing the hot path.
+
+- **Snapshot-in-memory model.** With `similarity_persist=true` the index **hydrates from a durable
+  snapshot at startup** and **write-throughs** each `remember`, but every `lookup` still runs
+  entirely in memory. Disk I/O happens only at startup and on write — never inside `lookup` — so
+  the hot path is unchanged and the cache is still correct when the snapshot is empty/unavailable.
+- **Confidential sidecar, posture mirrors the exact cache.** `SqliteSimilarityStore` is a separate
+  SQLite file at `similarity_path`, created **`0600`**, storing `(vector, exact-key, model,
+  tenant, created_at)` — **still never prompt text**. It persists **plaintext at `0600` when
+  `cache_encryption` is off**, exactly as `SqliteCache` persists response bodies; at-rest
+  encryption of the vector blob (via the same `CipherProvider` — per-tenant DEK, crypto-shred
+  parity) is a **follow-up slice**, not this one. We deliberately do **not** hold vectors to a
+  stricter rule than the response bodies they point to.
+- **Classification.** An embedding is prompt-derived **confidential** data (embedding inversion is
+  a real research area); on regulated hosts, enable `cache_encryption` (the follow-up slice seals
+  the vectors). The index file joins the exact cache as a `confidential` at-rest store in the
+  threat model.
+- **Fail open.** Any store error (load/append) degrades the index to **in-memory-only** — a broken
+  or missing snapshot never breaks the request path.
+- **Self-healing staleness.** The snapshot may reference exact-cache keys whose responses have
+  since expired/evicted; that just yields a **miss on fetch** (the response still comes from the
+  exact cache by key), so a stale index entry is harmless. FIFO cap parity bounds the file.
+- Unchanged invariants: same-model + same-tenant guards, high threshold, mandatory precision gate,
+  local-embedder default. `cache.*` remains in the 100%-critical gate.

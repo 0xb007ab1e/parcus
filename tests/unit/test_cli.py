@@ -175,6 +175,40 @@ def test_build_engine_has_no_similarity_by_default() -> None:
     assert engine._similarity is None
 
 
+def test_build_engine_wires_persistent_similarity_when_configured() -> None:
+    from parcus.cache import SqliteSimilarityStore
+
+    engine = cli.build_engine(
+        Settings(
+            _env_file=None,
+            cache=False,
+            metrics=False,
+            similarity_cache=True,
+            similarity_embedder="hashing",
+            similarity_allow_lexical=True,
+            similarity_persist=True,
+            similarity_path=":memory:",  # ephemeral — no file created by the test
+        )
+    )
+    assert engine._similarity is not None
+    assert isinstance(engine._similarity._store, SqliteSimilarityStore)
+
+
+def test_build_engine_similarity_has_no_store_when_persist_off() -> None:
+    engine = cli.build_engine(
+        Settings(
+            _env_file=None,
+            cache=False,
+            metrics=False,
+            similarity_cache=True,
+            similarity_embedder="hashing",
+            similarity_allow_lexical=True,
+        )
+    )
+    assert engine._similarity is not None
+    assert engine._similarity._store is None
+
+
 def test_build_engine_wraps_cache_in_encryption_when_enabled() -> None:
     import base64
 

@@ -77,6 +77,8 @@ def test_similarity_cache_disabled_by_default() -> None:
     s = Settings(_env_file=None)
     assert s.similarity_cache is False
     assert s.similarity_threshold == 0.97
+    assert s.similarity_persist is False  # index is in-memory unless persistence is opted in
+    assert s.similarity_path == ".parcus/similarity.sqlite"
 
 
 def test_similarity_threshold_out_of_range_rejected() -> None:
