@@ -270,3 +270,48 @@ keep-ratio at which v2 stops regressing answers?* Answer: **no.**
 _Sweep run 2026-07-03 (`PARCUS_LEARNED_LLMLINGUA2=1 parcus eval --learned --sweep 0.3,0.5,0.7,0.9`
 then `--sweep 0.95,0.99`), `LLMLinguaReducer(use_llmlingua2=True)`, punctuation `force_tokens`,
 keyword-recall judge._
+
+## Follow-up experiment — `force_reserve_digit` (protect numerics)
+
+The sweep pointed at numeric/unit loss, so we tried LLMLingua-2's **`force_reserve_digit`** (retain
+every digit token) and re-ran the same sweep with it on:
+
+```
+keep_ratio  mean recall  verdict
+--------------------------------
+      0.30          25%     FAIL
+      0.50          79%     FAIL
+      0.70          88%     FAIL
+      0.90          88%     FAIL
+no keep_ratio cleared the answer-preservation bar
+```
+
+**Result — no measurable change; same 88% ceiling.** Root-causing what v2 actually emits
+(`reserve_digits=True`) explains why digit reservation didn't move the number:
+
+| prompt | keep 0.9 output | why it (still) fails |
+|---|---|---|
+| `…main trade-off of response caching?` | `…explain main trade - off of response caching?` | v2 re-spaces `trade-off` → `trade - off`; the judge's exact substring `trade-off` never matches — **information is intact, punctuation is mutated** |
+| `…timeout to 30 seconds… 500 dollars.` | `…timeout to 30 seconds and keep budget cap at 500 dollars.` (0.9) / `…timeout 30 budget cap 500 dollars.` (0.5) | digits kept (`30`, `500`), but the **unit word** `seconds` is pruned at 0.5, so `30 seconds` breaks; passes only at 0.9 |
+
+So the residual failures are **not bare digits**:
+1. **Punctuation re-spacing** — v2 detokenizes `trade-off` as `trade - off` (and ` , explain`). This is the *sole* remaining failure at keep_ratio 0.9 (`caching-tradeoff` = 50%; the other three cases are 100%). The answer content survives; the exact-substring judge and v2's whitespace mutation disagree.
+2. **Unit-word dropping** at aggressive ratios — digit reservation keeps `30`/`500` but not `seconds`/`dollars`.
+
+**Decision — v2 stays OFF, and the digit-reservation knob is NOT retained.** `force_reserve_digit`
+made no measurable difference, so keeping it would be a speculative, unproven tuning knob on a
+backend that is itself off and non-viable — dead weight (YAGNI / minimize surface, master §2). The
+*finding* is the deliverable, not the code; the reducer keeps only the punctuation `force_tokens`
+from the previous step. Two independent blockers remain, and the first is the more damning for a
+*preservation-focused* proxy: **v2 mutates the prose's punctuation spacing** (`trade-off` →
+`trade - off`) — a change beyond "drop low-information tokens" that this project's "never alter
+meaning/format we don't have to" ethos disfavours. v1/`gpt2` remains the shipping default.
+
+**Honest scope:** the 88% ceiling is partly a **measurement artifact** (exact-substring recall vs
+v2's re-spacing), not pure information loss — but the punctuation mutation it exposes is itself a
+real reason to keep v2 off. Not pursued further; a whitespace-normalising post-process on v2 output
+(and/or unit-aware `force_tokens`) is a possible future thread, tracked but not built.
+
+_Experiment run 2026-07-03 (`PARCUS_LEARNED_LLMLINGUA2=1 parcus eval --learned --sweep …` with
+`force_reserve_digit` on), plus a direct v2-output probe on the two failing prompts. The knob was
+removed after measuring no effect._
