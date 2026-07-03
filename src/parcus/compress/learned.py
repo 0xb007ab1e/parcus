@@ -193,7 +193,8 @@ class LLMLinguaReducer:
     * **LLMLingua-2** (``use_llmlingua2=True``) — a token-classification model
       (:data:`DEFAULT_LLMLINGUA2_MODEL`) that is faster and higher-fidelity, and force-retains
       punctuation/newlines so structure survives. More capable → **validate offline** on the
-      answer-preservation gate before enabling it.
+      answer-preservation gate before enabling it. (Digit reservation was measured and made no
+      difference; see ``docs/validation/RESULTS.md``.)
 
     Args:
         model_name: A local model the selected backend can drive. ``None``/empty selects the
@@ -230,7 +231,7 @@ class LLMLinguaReducer:
             )
         kwargs: dict[str, Any] = {"rate": keep_ratio}
         if self._use_llmlingua2:
-            kwargs["force_tokens"] = _LLMLINGUA2_FORCE_TOKENS
+            kwargs["force_tokens"] = _LLMLINGUA2_FORCE_TOKENS  # keep sentence structure
         result = self._compressor.compress_prompt(text, **kwargs)
         compressed = result["compressed_prompt"]
         return compressed if isinstance(compressed, str) else text
