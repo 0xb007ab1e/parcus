@@ -32,14 +32,15 @@ built-in adversarial set fails the lexical embedder by design.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 from parcus.memory.embedding import EmbedderPort, cosine
 
-__all__ = ["SimilarityCache"]
+__all__ = ["SimilarityCache", "SimilarityEntry", "SimilarityStore"]
 
 
 @dataclass(frozen=True, slots=True)
-class _Entry:
+class SimilarityEntry:
     """An indexed cached request: its embedding, the exact cache key, and its guards."""
 
     vector: list[float]
@@ -48,23 +49,57 @@ class _Entry:
     tenant: str
 
 
+@runtime_checkable
+class SimilarityStore(Protocol):
+    """Durable snapshot of similarity-index entries (a persistence port; fails open).
+
+    The concrete implementation lives in :mod:`parcus.cache.similarity_store`; this protocol is
+    defined here so :class:`SimilarityCache` depends only on the abstraction (no import cycle).
+    """
+
+    def load(self) -> list[SimilarityEntry]:
+        """Return the persisted entries (most-recent-capped), oldest first."""
+        ...
+
+    def append(self, entry: SimilarityEntry) -> None:
+        """Persist a newly indexed entry (best-effort)."""
+        ...
+
+
 class SimilarityCache:
     """A bounded, in-memory near-duplicate index over exact-cache keys.
+
+    When a :class:`SimilarityStore` is supplied the index is a **snapshot**: it hydrates from the
+    store at construction (so hits survive a restart) and write-throughs new entries, but every
+    ``lookup`` still runs entirely in memory — persistence adds no hot-path cost.
 
     Args:
         embedder: Local embedder mapping request text to a vector.
         threshold: Minimum cosine similarity to count as a near-duplicate (``[0, 1]``).
         max_entries: Cap on indexed entries; oldest are evicted first (FIFO).
+        store: Optional durable snapshot; hydrated on construction, written through on
+            ``remember``. Any store error degrades the index to in-memory-only (fails open).
     """
 
     def __init__(
-        self, embedder: EmbedderPort, *, threshold: float = 0.97, max_entries: int = 2048
+        self,
+        embedder: EmbedderPort,
+        *,
+        threshold: float = 0.97,
+        max_entries: int = 2048,
+        store: SimilarityStore | None = None,
     ) -> None:
-        """Hold the embedder, threshold, capacity, and an empty index."""
+        """Hold the embedder/threshold/capacity and hydrate from the store if one is given."""
         self._embedder = embedder
         self._threshold = threshold
         self._max = max_entries
-        self._entries: list[_Entry] = []
+        self._store = store
+        self._entries: list[SimilarityEntry] = []
+        if store is not None:
+            try:
+                self._entries = list(store.load())[-max_entries:]  # warm-start (bounded)
+            except Exception:
+                self._entries = []  # fail open: a broken store => empty in-memory index
 
     def lookup(self, *, text: str, model: str | None, tenant: str) -> str | None:
         """Return the exact-cache key of the best near-duplicate, or ``None``.
@@ -88,11 +123,21 @@ class SimilarityCache:
             return None
 
     def remember(self, *, text: str, key: str, model: str | None, tenant: str) -> None:
-        """Index a freshly cached request for future near-duplicate lookups (fails open)."""
+        """Index a freshly cached request for future near-duplicate lookups (fails open).
+
+        When a store is configured the entry is also written through to it (best-effort); a store
+        failure leaves the in-memory index intact — persistence never breaks the request path.
+        """
         try:
             vector = self._embedder.embed([text])[0]
-            self._entries.append(_Entry(vector=vector, key=key, model=model, tenant=tenant))
+            entry = SimilarityEntry(vector=vector, key=key, model=model, tenant=tenant)
+            self._entries.append(entry)
             if len(self._entries) > self._max:
                 self._entries.pop(0)  # FIFO eviction — a cap, not a correctness guarantee
         except Exception:
             return
+        if self._store is not None:
+            try:
+                self._store.append(entry)  # write-through snapshot (fails open)
+            except Exception:
+                return

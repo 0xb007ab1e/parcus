@@ -17,7 +17,13 @@ import uvicorn
 from fastapi import FastAPI
 
 from parcus import __version__
-from parcus.cache import CachePolicy, NullCache, SimilarityCache, SqliteCache
+from parcus.cache import (
+    CachePolicy,
+    NullCache,
+    SimilarityCache,
+    SqliteCache,
+    SqliteSimilarityStore,
+)
 from parcus.compress import (
     AGGRESSIVE_FILLERS,
     DEFAULT_FILLERS,
@@ -198,14 +204,26 @@ def _maybe_encrypt(cache: CachePort, settings: Settings) -> CachePort:
 
 
 def _build_similarity(settings: Settings) -> SimilarityCache | None:
-    """Build the opt-in semantic cache (local embedder), or ``None`` when disabled."""
+    """Build the opt-in semantic cache (local embedder), or ``None`` when disabled.
+
+    When ``similarity_persist`` is set, back it with a confidential sidecar snapshot so
+    near-duplicate hits survive a restart (the index still operates in memory).
+    """
     if not settings.similarity_cache:
         return None
     embedder = _embedder(settings.similarity_embedder) or HashingEmbedder()
+    store: SqliteSimilarityStore | None = None
+    if settings.similarity_persist:
+        if settings.similarity_path != ":memory:":
+            Path(settings.similarity_path).parent.mkdir(parents=True, exist_ok=True)
+        store = SqliteSimilarityStore(
+            settings.similarity_path, max_entries=settings.similarity_max_entries
+        )
     return SimilarityCache(
         embedder,
         threshold=settings.similarity_threshold,
         max_entries=settings.similarity_max_entries,
+        store=store,
     )
 
 

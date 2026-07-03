@@ -104,6 +104,11 @@ class Settings(BaseSettings):
     # using it requires the explicit acknowledgement below (ADR 0004).
     similarity_embedder: str = "local"
     similarity_allow_lexical: bool = False
+    # Persist the similarity index across restarts (opt-in snapshot; the index is otherwise cold
+    # after every restart). Confidential sidecar SQLite at `similarity_path`, created 0600; posture
+    # mirrors the exact cache (plaintext at 0600 when cache_encryption is off — ADR 0004).
+    similarity_persist: bool = False
+    similarity_path: str = ".parcus/similarity.sqlite"
 
     # At-rest cache encryption (opt-in). Key is base64(32 bytes) for AES-256, from env or a
     # keyfile (never in code/VCS). Enabling without a valid key fails closed at startup.

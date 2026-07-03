@@ -18,14 +18,18 @@ from parcus.cache.clock import SystemClock
 from parcus.cache.key import compute_key
 from parcus.cache.null import NullCache
 from parcus.cache.policy import CachePolicy
-from parcus.cache.similarity import SimilarityCache
+from parcus.cache.similarity import SimilarityCache, SimilarityEntry, SimilarityStore
+from parcus.cache.similarity_store import SqliteSimilarityStore
 from parcus.cache.sqlite_cache import SqliteCache
 
 __all__ = [
     "CachePolicy",
     "NullCache",
     "SimilarityCache",
+    "SimilarityEntry",
+    "SimilarityStore",
     "SqliteCache",
+    "SqliteSimilarityStore",
     "SystemClock",
     "compute_key",
 ]
