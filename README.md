@@ -212,6 +212,11 @@ The generated index lives in `.codebase-memory/` and is **git-ignored** (a ~1.4 
 changes on every re-index — regenerate it locally rather than vendoring it). Contributors without
 the MCP server can ignore this section entirely.
 
+**When the memory MCP is available and the project has been indexed, prefer it for tracking the
+project shape** — call graphs (who-calls-what), impact/blast-radius of a change, and dead-code
+detection — over ad-hoc `grep`/`glob`. It answers structural questions precisely and cheaply; keep
+the index fresh by re-running `/codebase-memory index` after significant structural changes.
+
 ## License
 
 [MIT](https://github.com/0xb007ab1e/parcus/blob/main/LICENSE).
