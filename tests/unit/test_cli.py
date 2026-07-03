@@ -106,25 +106,6 @@ def test_build_engine_wires_learned_tier_when_enabled() -> None:
     assert isinstance(only_learned._compressor, LearnedCompressor)
 
 
-def test_build_engine_wires_llmlingua2_backend_when_configured() -> None:
-    # learned_llmlingua2=True selects the LLMLingua-2 backend + its default model on the reducer.
-    from parcus.compress import LearnedCompressor
-    from parcus.compress.learned import DEFAULT_LLMLINGUA2_MODEL
-
-    engine = cli.build_engine(
-        Settings(
-            _env_file=None,
-            cache=False,
-            metrics=False,
-            lossless=False,
-            learned=True,
-            learned_llmlingua2=True,
-        )
-    )
-    assert isinstance(engine._compressor, LearnedCompressor)
-    assert engine._compressor._reducer.model_name == DEFAULT_LLMLINGUA2_MODEL
-
-
 def test_build_engine_honours_explicit_learned_model() -> None:
     from parcus.compress import LearnedCompressor
 
@@ -409,12 +390,11 @@ def test_eval_learned_sweep_skips_when_model_unavailable(
     assert "skipped" in capsys.readouterr().out.lower()
 
 
-def test_eval_learned_honours_llmlingua2_env_flag(
+def test_eval_learned_skip_message_names_the_model(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # PARCUS_LEARNED_LLMLINGUA2 selects the v2 backend. Pinned to a nonexistent model so the probe
-    # fails deterministically (CI-safe skip) regardless of whether the 'learned' extra is present.
-    monkeypatch.setenv("PARCUS_LEARNED_LLMLINGUA2", "true")
+    # PARCUS_LEARNED_MODEL pins the local model; a nonexistent one skips deterministically and the
+    # skip message names the resolved model (regardless of whether the 'learned' extra is present).
     monkeypatch.setenv("PARCUS_LEARNED_MODEL", "/nonexistent/model/path")
     rc = cli.main(["eval", "--learned"])
     assert rc == 0

@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 
 from parcus.compress.learned import (
-    DEFAULT_LLMLINGUA2_MODEL,
     DEFAULT_LLMLINGUA_MODEL,
     LearnedCompressor,
     LLMLinguaReducer,
@@ -108,24 +107,17 @@ def test_learned_leaves_structured_message_with_non_list_content_verbatim() -> N
     assert stats[0].spans_touched == 0
 
 
-class TestLLMLinguaReducerBackend:
-    """Backend selection + default model resolution (no model load — construction only)."""
+class TestLLMLinguaReducerModel:
+    """Default model resolution + override (no model load — construction only)."""
 
-    def test_v1_is_the_default_backend(self) -> None:
+    def test_default_model_is_gpt2(self) -> None:
         assert LLMLinguaReducer().model_name == DEFAULT_LLMLINGUA_MODEL
 
-    def test_llmlingua2_selects_its_default_model(self) -> None:
-        assert LLMLinguaReducer(use_llmlingua2=True).model_name == DEFAULT_LLMLINGUA2_MODEL
-
-    def test_explicit_model_overrides_the_backend_default(self) -> None:
+    def test_explicit_model_overrides_the_default(self) -> None:
         assert LLMLinguaReducer("my/local-model").model_name == "my/local-model"
-        # Even with the v2 backend selected, an explicit name wins.
-        v2 = LLMLinguaReducer("my/local-model", use_llmlingua2=True)
-        assert v2.model_name == "my/local-model"
 
-    def test_empty_model_name_falls_back_to_backend_default(self) -> None:
+    def test_empty_model_name_falls_back_to_default(self) -> None:
         assert LLMLinguaReducer("").model_name == DEFAULT_LLMLINGUA_MODEL
-        assert LLMLinguaReducer("", use_llmlingua2=True).model_name == DEFAULT_LLMLINGUA2_MODEL
 
 
 class TestLearnedCompressor:

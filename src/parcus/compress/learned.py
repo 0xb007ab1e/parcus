@@ -28,7 +28,6 @@ from parcus.spans import classify_spans
 from parcus.tokenize import default_tokenizer
 
 __all__ = [
-    "DEFAULT_LLMLINGUA2_MODEL",
     "DEFAULT_LLMLINGUA_MODEL",
     "LLMLinguaReducer",
     "LearnedCompressor",
@@ -171,48 +170,31 @@ class LearnedCompressor:
             return request, ()
 
 
-# Conservative per-backend defaults. LLMLingua v1 scores tokens by a small causal LM's perplexity;
-# LLMLingua-2 uses a token-classification model that is faster and higher-fidelity.
+# LLMLingua v1 scores tokens by a small causal LM's perplexity. (The LLMLingua-2
+# token-classification backend was evaluated and removed — it mutates prose punctuation and never
+# cleared the answer-preservation gate; see docs/validation/RESULTS.md.)
 DEFAULT_LLMLINGUA_MODEL = "gpt2"
-DEFAULT_LLMLINGUA2_MODEL = "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
-
-# LLMLingua-2 keeps sentence boundaries by force-retaining punctuation/newlines, so the compressed
-# prose stays parseable (v1 has no equivalent knob).
-_LLMLINGUA2_FORCE_TOKENS = ["\n", ".", "!", "?", ","]
 
 
 class LLMLinguaReducer:
-    """Local LLMLingua-backed reducer (lazy import of the optional ``learned`` extra).
+    """Local LLMLingua (v1) reducer (lazy import of the optional ``learned`` extra).
 
-    The model is loaded from the local cache on first use and never makes a network call.
-
-    Two local backends are selectable:
-
-    * **LLMLingua v1** (default) — a small causal LM (:data:`DEFAULT_LLMLINGUA_MODEL`) scores
-      tokens by perplexity.
-    * **LLMLingua-2** (``use_llmlingua2=True``) — a token-classification model
-      (:data:`DEFAULT_LLMLINGUA2_MODEL`) that is faster and higher-fidelity, and force-retains
-      punctuation/newlines so structure survives. More capable → **validate offline** on the
-      answer-preservation gate before enabling it. (Digit reservation was measured and made no
-      difference; see ``docs/validation/RESULTS.md``.)
+    A small local causal LM (:data:`DEFAULT_LLMLINGUA_MODEL`) scores tokens by perplexity and drops
+    the least-informative ones. Loaded from the local cache on first use; never a network call.
 
     Args:
-        model_name: A local model the selected backend can drive. ``None``/empty selects the
-            backend's conservative default.
-        use_llmlingua2: Select the LLMLingua-2 token-classification backend.
+        model_name: A local causal LM to drive. ``None``/empty selects
+            :data:`DEFAULT_LLMLINGUA_MODEL`.
     """
 
-    def __init__(self, model_name: str | None = None, *, use_llmlingua2: bool = False) -> None:
-        """Choose the backend + default model; defer model construction to :meth:`reduce`."""
-        self._use_llmlingua2 = use_llmlingua2
-        self._model_name = model_name or (
-            DEFAULT_LLMLINGUA2_MODEL if use_llmlingua2 else DEFAULT_LLMLINGUA_MODEL
-        )
+    def __init__(self, model_name: str | None = None) -> None:
+        """Resolve the model name; defer model construction to :meth:`reduce`."""
+        self._model_name = model_name or DEFAULT_LLMLINGUA_MODEL
         self._compressor: Any = None  # llmlingua.PromptCompressor, loaded lazily
 
     @property
     def model_name(self) -> str:
-        """The resolved local model name for the selected backend."""
+        """The resolved local model name."""
         return self._model_name
 
     def reduce(self, text: str, *, keep_ratio: float) -> str:  # pragma: no cover - needs model
@@ -224,14 +206,7 @@ class LLMLinguaReducer:
                 raise ImportError(
                     "the learned tier requires the 'learned' extra: pip install 'parcus[learned]'"
                 ) from exc
-            self._compressor = PromptCompressor(
-                model_name=self._model_name,
-                device_map="cpu",
-                use_llmlingua2=self._use_llmlingua2,
-            )
-        kwargs: dict[str, Any] = {"rate": keep_ratio}
-        if self._use_llmlingua2:
-            kwargs["force_tokens"] = _LLMLINGUA2_FORCE_TOKENS  # keep sentence structure
-        result = self._compressor.compress_prompt(text, **kwargs)
+            self._compressor = PromptCompressor(model_name=self._model_name, device_map="cpu")
+        result = self._compressor.compress_prompt(text, rate=keep_ratio)
         compressed = result["compressed_prompt"]
         return compressed if isinstance(compressed, str) else text
