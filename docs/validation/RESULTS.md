@@ -315,3 +315,59 @@ real reason to keep v2 off. Not pursued further; a whitespace-normalising post-p
 _Experiment run 2026-07-03 (`PARCUS_LEARNED_LLMLINGUA2=1 parcus eval --learned --sweep …` with
 `force_reserve_digit` on), plus a direct v2-output probe on the two failing prompts. The knob was
 removed after measuring no effect._
+
+# Semantic (similarity) cache — local embedder precision gate (PASSED)
+
+The opt-in semantic cache (ADR 0004) serves a cached response for a *near-duplicate* request on an
+exact miss — the single largest token win, but it **trades correctness for tokens**, so its safety
+rests entirely on the embedder clearing the precision gate (`parcus eval --similarity`, which fails
+on **any** false hit). ADR 0004 defaults to the **local** sentence-transformer embedder
+(`all-MiniLM-L6-v2`) and asserts it is the safe choice. This validates that assertion by
+measurement.
+
+Gate: `parcus eval --similarity --embedder <e>` at the shipping default `threshold=0.97`.
+
+```
+LOCAL (all-MiniLM-L6-v2) — the safe default under test
+case                            sim  pred  want   ok
+----------------------------------------------------
+paraphrase-whitespace         1.000   hit   hit   ok
+paraphrase-trailing-please    0.970   hit   hit   ok
+different-intent-shared-word  0.876  miss  miss   ok
+different-topic               0.350  miss  miss   ok
+opposite-number               0.898  miss  miss   ok
+----------------------------------------------------
+threshold=0.970  precision=100.0%  recall=100.0%  false_hits=0  PASS
+```
+
+**Finding — local embedder PASSES: 100% precision, 100% recall, zero false hits.** The decisive
+case is `opposite-number` — *"scale to 10 replicas"* vs *"…2 replicas"* — which must **not** hit
+(different answer). Local scores it **0.898 < 0.97 → correctly a miss**, with comfortable margin;
+it also catches both true paraphrases (whitespace 1.000, trailing-please exactly 0.970). So the
+default config (local + 0.97) reuses cached answers only for genuine near-duplicates.
+
+Control — the dependency-free **lexical `hashing`** embedder, run for contrast, **FAILS** as ADR
+0004 documents:
+
+```
+HASHING (lexical) — control, expected FAIL
+opposite-number               1.000   hit  miss   XX   ← false hit: "10 replicas" ≡ "2 replicas"
+paraphrase-trailing-please    0.894  miss   hit   XX   ← missed paraphrase (recall loss)
+threshold=0.970  precision=50.0%  false_hits=1  FAIL
+```
+
+It **false-hits `opposite-number` at cosine 1.000** (it drops numbers, so the two prompts embed
+identically) — a correctness bug at any threshold. This confirms the gate bites and that the
+lexical embedder is unsafe for caching (why it's fail-closed behind `similarity_allow_lexical`).
+
+**Decision — the safe default is now measured, not asserted; the opt-in similarity cache is
+validated for use with `similarity_embedder=local`.** Enabling it still requires the `embeddings`
+extra (`pip install 'parcus[embeddings]'`) and stays off by default.
+
+**Honest scope:** a 5-case built-in adversarial set (small), the default model + threshold, and a
+model-free structural gate (cosine vs. labelled should-hit) — not end-to-end production quality.
+Operators who change the embedder or threshold must re-run the gate; a larger corpus and per-tenant
+threshold tuning remain follow-ups (ADR 0004).
+
+_Gate run 2026-07-03 (`parcus eval --similarity --embedder local` / `--embedder hashing`),
+`all-MiniLM-L6-v2`, threshold 0.97, adversarial precision judge._
