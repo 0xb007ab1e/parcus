@@ -221,3 +221,43 @@ duplicate, not end-to-end task quality on production traffic. It's the no-regres
 for enabling `dedup`.
 
 _Gate run 2026-07-02 (`parcus eval --dedup`), `DedupCompressor(min_chars=200)`, keyword-recall judge._
+
+# Tier-2 learned — LLMLingua-2 backend (answer-preservation gate)
+
+The Tier-2 learned compressor now supports the **LLMLingua-2** local backend
+(`use_llmlingua2=True` / `learned_llmlingua2`) alongside the incumbent LLMLingua v1 (`gpt2`,
+perplexity-based). v2 is a token-classification model — faster and higher-fidelity in the
+literature — and force-retains punctuation/newlines so structure survives. It is **opt-in and OFF
+by default**; per the project ethos (correctness is the gate, tokens are the objective) it must
+clear the offline answer-preservation gate before an operator enables it.
+
+Gate: `PARCUS_LEARNED_LLMLINGUA2=1 parcus eval --learned` runs the chain
+(lossless → aggressive-filler → `LearnedCompressor(LLMLinguaReducer(use_llmlingua2=True), keep_ratio=0.5)`)
+over the builtin judged corpus with the deterministic keyword-recall judge.
+
+```
+case                          recall    ok
+--------------------------------------------
+scale-replicas                 100%    ok
+caching-tradeoff                50%  FAIL
+timeout-budget                  67%  FAIL
+define-idempotent              100%    ok
+--------------------------------------------
+mean                            79%  FAIL
+```
+
+**Finding — does NOT pass at `keep_ratio=0.5`.** At the default target ratio, v2's aggressive
+pruning drops answer-relevant tokens on two of four cases (a caching trade-off number and a timeout
+budget), landing at 79% mean recall — below the gate's bar. This is exactly the "validate offline
+before enabling" caveat firing: the backend is wired and selectable, but **stays off** until it
+clears the gate. Next steps before enabling: raise `keep_ratio` (less aggressive), expand
+`force_tokens` to protect numerics/units, and/or grow the judged corpus so the number is
+representative.
+
+**Honest scope:** model-free, CI-safe structural gate (keyword recall over a small corpus), not
+end-to-end production quality — but sufficient to establish that v2-at-0.5 is a **regression** vs.
+the answer-preservation bar and therefore not ready to ship on.
+
+_Gate run 2026-07-03 (`PARCUS_LEARNED_LLMLINGUA2=1 parcus eval --learned`),
+`LLMLinguaReducer(use_llmlingua2=True)` @ `keep_ratio=0.5`, keyword-recall judge. v1/`gpt2` not
+re-benchmarked this pass (CPU-bound, minutes per run); it remains the shipping default._
