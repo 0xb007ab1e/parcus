@@ -70,6 +70,17 @@ class Settings(BaseSettings):
     # a live request. Only explicit-breakpoint providers act on it. See
     # docs/design/token-reduction-roadmap.md §2.1 (M1b).
     cache_inject: bool = False
+    # Gemini explicit context caching (opt-in, OFF by default). When on, parcus registers a large
+    # stable prefix as a Gemini `cachedContents` resource and references the handle instead of
+    # re-sending it — a token discount for the one provider caching model breakpoint injection
+    # can't reach. It is STATEFUL and SPENDS (per-hour storage), so handles are TTL-bounded, capped
+    # at `gemini_cache_max_entries`, and evicted; it changes billing/transport only, never content,
+    # so it needs no answer-preservation gate. Not yet on the request path — the strategy +
+    # registrar seams land first; Gemini request routing is the follow-up. See
+    # docs/adr/0010-gemini-context-cache-adapter.md.
+    gemini_context_cache: bool = False
+    gemini_cache_ttl_seconds: int = 3600  # tracked handle lifetime; <= the provider's own TTL
+    gemini_cache_max_entries: int = 64  # spend cap: max concurrent live provider caches
     # When injecting, only do so once a prefix has been seen before (within the provider cache
     # window) — the ~1.25x cache-write premium is then only paid when a repeat (a ~0.1x read) is
     # likely, keeping injection never-cost-more in expectation (issue #56). Off = always inject on

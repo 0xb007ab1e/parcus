@@ -15,6 +15,7 @@ from parcus.model import (
     CachedResponse,
     CanonicalRequest,
     CompressionStats,
+    ContextCacheHandle,
     RedactionReport,
 )
 
@@ -23,6 +24,7 @@ __all__ = [
     "CacheStrategy",
     "ClockPort",
     "CompressorPort",
+    "ContextCacheRegistrar",
     "MemoryPort",
     "RedactorPort",
     "TokenizerPort",
@@ -140,6 +142,40 @@ class CacheStrategy(Protocol):
         ``cache_control`` is the dialect serialiser's job. Fail-open: returning the request
         unchanged is always safe.
         """
+        ...
+
+
+@runtime_checkable
+class ContextCacheRegistrar(Protocol):
+    """Stateful lifecycle for a provider **explicit context cache** (Gemini ``cachedContents``).
+
+    Unlike :class:`CacheStrategy` — a *pure* request→request policy — this port does **network
+    I/O** and holds **handle state**: it registers a large stable prefix with the provider,
+    returns a reusable :class:`~parcus.model.ContextCacheHandle`, and evicts expired ones to bound
+    the per-hour storage cost. It therefore lives in the imperative shell and is injected; the pure
+    core never calls a provider client directly (ADR 0001 / ADR 0010).
+
+    Implementations MUST **fail open**: :meth:`ensure` returns ``None`` (⇒ forward the prefix
+    inline, uncached) on any error, a below-worthwhile prefix, a spend-cap hit, or a miss it can't
+    create; :meth:`evict_expired` no-ops on error. Handles MUST be scoped per ``(tenant, model,
+    prefix)`` so a cache is never shared across tenants or models (a handle is only valid for the
+    credential/project that created it). Since this changes only billing/transport and never
+    request or response content, it needs no answer-preservation gate.
+    """
+
+    def ensure(
+        self, prefix: str, *, model: str | None, tenant: str = ""
+    ) -> ContextCacheHandle | None:
+        """Return a live handle for ``prefix`` under ``(tenant, model)``, creating one if useful.
+
+        ``None`` means "not cached — forward the prefix inline," always the safe, fail-open answer
+        (a fresh, expired, spend-capped, or errored lookup all resolve to ``None``). Side-effectful
+        (may call the provider and persist the handle) but MUST NOT raise.
+        """
+        ...
+
+    def evict_expired(self) -> None:
+        """Delete provider caches whose tracked TTL has lapsed to bound cost; never raises."""
         ...
 
 

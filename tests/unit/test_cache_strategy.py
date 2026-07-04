@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from parcus.cache.strategy import (
     AnthropicCacheStrategy,
+    GeminiCacheStrategy,
     NullCacheStrategy,
     cache_strategy,
 )
@@ -52,6 +53,7 @@ def test_cache_model_members() -> None:
     assert CacheModel.NONE == "none"
     assert CacheModel.AUTOMATIC_PREFIX == "automatic_prefix"
     assert CacheModel.EXPLICIT_BREAKPOINT == "explicit_breakpoint"
+    assert CacheModel.EXPLICIT_CONTEXT_API == "explicit_context_api"
 
 
 def test_cache_capability_defaults() -> None:
@@ -146,12 +148,54 @@ class TestAnthropicCacheStrategy:
         assert strat.annotate(req) is req
 
 
+# --- GeminiCacheStrategy ----------------------------------------------------------------------
+
+
+class TestGeminiCacheStrategy:
+    def test_capability(self) -> None:
+        cap = GeminiCacheStrategy().capability
+        assert cap.model is CacheModel.EXPLICIT_CONTEXT_API
+        assert cap.min_prefix_tokens == 4096  # conservative placeholder floor (verify vs. docs)
+        assert cap.max_breakpoints == 0  # no in-request breakpoints — the handle lives in the shell
+
+    def test_boundary_protects_all_but_last_turn(self) -> None:
+        strat = GeminiCacheStrategy()
+        three = (_msg("sys ctx"), _msg("prior"), _msg("the question"))
+        assert strat.cacheable_boundary(_req(dialect=Dialect.GEMINI, messages=three)) == 2
+
+    def test_boundary_single_message_protects_prefix_only(self) -> None:
+        strat = GeminiCacheStrategy()
+        req = _req(dialect=Dialect.GEMINI, messages=(_msg("only turn"),))
+        assert strat.cacheable_boundary(req) == 0
+
+    def test_boundary_no_messages_with_system(self) -> None:
+        strat = GeminiCacheStrategy()
+        assert strat.cacheable_boundary(_req(dialect=Dialect.GEMINI, system="stable")) == 0
+
+    def test_boundary_no_messages_with_tools_only(self) -> None:
+        strat = GeminiCacheStrategy()
+        assert strat.cacheable_boundary(_req(dialect=Dialect.GEMINI, tools_json="[{}]")) == 0
+
+    def test_boundary_empty_request_is_none(self) -> None:
+        strat = GeminiCacheStrategy()
+        assert strat.cacheable_boundary(_req(dialect=Dialect.GEMINI)) is None
+
+    def test_annotate_is_always_identity(self) -> None:
+        # Referencing a context cache is a shell action, not an in-request marker → no-op policy.
+        strat = GeminiCacheStrategy()
+        req = _req(dialect=Dialect.GEMINI, messages=(_msg("a"), _msg("b")), system="s")
+        assert strat.annotate(req) is req
+
+
 # --- Registry ---------------------------------------------------------------------------------
 
 
 class TestCacheStrategyRegistry:
     def test_anthropic_resolves_to_anthropic_strategy(self) -> None:
         assert isinstance(cache_strategy(Dialect.ANTHROPIC), AnthropicCacheStrategy)
+
+    def test_gemini_resolves_to_gemini_strategy(self) -> None:
+        assert isinstance(cache_strategy(Dialect.GEMINI), GeminiCacheStrategy)
 
     def test_openai_falls_back_to_null(self) -> None:
         # OpenAI is automatic-prefix (preserve-only); its dedicated strategy is a later slice,
@@ -168,3 +212,4 @@ class TestCacheStrategyRegistry:
 def test_strategies_satisfy_the_port() -> None:
     assert isinstance(NullCacheStrategy(), CacheStrategy)
     assert isinstance(AnthropicCacheStrategy(), CacheStrategy)
+    assert isinstance(GeminiCacheStrategy(), CacheStrategy)
