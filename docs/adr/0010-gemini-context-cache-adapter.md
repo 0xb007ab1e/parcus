@@ -136,4 +136,44 @@ slice necessarily adds Gemini request/response parsing and serialisation
 - **Abstractive/extractive request compression for Gemini instead** — deferred. That is the
   §4.2 lever: higher-leverage but content-transforming, so it needs a local model + a new
   answer-preservation gate. This ADR takes the zero-risk win first (frontier §6 sequencing).
-```
+
+## Update (2026-07-04): scaffold landed; the registrar port is async
+
+The seams shipped in PR #84 (`feat/gemini-context-cache-scaffold`): `Dialect.GEMINI`,
+`CacheModel.EXPLICIT_CONTEXT_API`, `ContextCacheHandle`, the pure `GeminiCacheStrategy` (registered),
+the `ContextCacheRegistrar` port, `NullContextCacheRegistrar` + `GeminiContextCacheRegistrar`
+(lifecycle tested via injected create/delete), the opt-in settings, and the optional `gemini` extra.
+An independent review confirmed the additions are **inert** on the live path (`detect()` never yields
+`GEMINI`; `_inject_cache_breakpoint` gates on `EXPLICIT_BREAKPOINT`) and the lifecycle policy is sound.
+It surfaced one decision that is cheapest to make now, while the port has no callers.
+
+**Decision — the registrar port is asynchronous.** `ContextCacheRegistrar.ensure` /
+`evict_expired` are `async def`, and the production factory is backed by the async Gemini client
+(`client.aio.caches.*`). This refines Decision 2. Rationale:
+
+- The engine forward path is **async** (httpx). The real `genai.Client.caches.create/delete` calls
+  **block**; invoking a *sync* registrar that does blocking network I/O on the event loop would stall
+  it (`topic-concurrency` / `topic-reliability`: never block the loop with sync I/O).
+- Offloading a sync port to a threadpool instead would reintroduce a **data race** on the unguarded
+  `_handles` dict. An async port keeps the registrar single-tasked on the loop (atomic between
+  `await`s) with no lock, matching how the engine already treats its other collaborators.
+- This is what the original Decision 2 intended ("httpx, async"); the scaffold shipped **sync
+  placeholders** only because nothing called them yet. Converting the port to async is the **first
+  task of the wiring slice**, before any caller depends on the sync shape — so the change is confined
+  to the port + registrars + their tests, at no extra cost versus having done it now.
+
+**Also folded into the wiring slice (review findings, non-blocking):**
+
+- **Bound the handle map.** `ensure` currently sheds expired entries only for the requested key or on
+  `evict_expired()`; opportunistically prune (or sweep on the miss path) so in-memory growth is
+  structural, not dependent on an external scheduler (`topic-resource-management`). Provider *spend*
+  is already bounded by the live-handle cap.
+- **Redaction before registration is a hard requirement.** The scaffold's `ensure(prefix, …)` cannot
+  enforce §7; the engine path MUST redact before calling `ensure`, with an explicit test asserting it.
+- **Validate the new settings** (`Field(ge=1)` on `gemini_cache_ttl_seconds` /
+  `gemini_cache_max_entries`) and ensure `google-genai` resolves into the lockfile **with hashes**
+  when the `gemini` extra is locked (`std-supplychain`).
+
+**Status stays `Proposed`** until the wiring slice (Gemini request routing — detect
+`generateContent` → parse → serialise a `cachedContent` reference — plus engine integration and a
+live-key validation) lands and flips it to `Accepted`.
