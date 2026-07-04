@@ -24,6 +24,7 @@ __all__ = [
     "CachedResponse",
     "CanonicalRequest",
     "CompressionStats",
+    "ContextCacheHandle",
     "Dialect",
     "Message",
     "ProviderUsage",
@@ -47,6 +48,7 @@ class Dialect(StrEnum):
 
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
+    GEMINI = "gemini"
     UNKNOWN = "unknown"
 
 
@@ -59,11 +61,18 @@ class CacheModel(StrEnum):
       (e.g. OpenAI, DeepSeek). parcus can only *preserve* it (not perturb the cacheable prefix).
     * ``EXPLICIT_BREAKPOINT`` — the provider caches at client-declared breakpoints (Anthropic
       ``cache_control``). parcus can both *preserve* and *inject* a breakpoint.
+    * ``EXPLICIT_CONTEXT_API`` — the provider caches a client-registered prefix behind an opaque
+      **handle** managed via a separate stateful API (Gemini ``cachedContents``): create → hold →
+      reference → evict, with a per-hour storage cost. This is not an in-request marker — the
+      lifecycle lives behind a :class:`~parcus.ports.ContextCacheRegistrar` (I/O), while the pure
+      strategy only reports the preservable prefix. See
+      ``docs/adr/0010-gemini-context-cache-adapter.md``.
     """
 
     NONE = "none"
     AUTOMATIC_PREFIX = "automatic_prefix"
     EXPLICIT_BREAKPOINT = "explicit_breakpoint"
+    EXPLICIT_CONTEXT_API = "explicit_context_api"
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +95,35 @@ class CacheCapability:
     model: CacheModel
     min_prefix_tokens: int = 0
     max_breakpoints: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ContextCacheHandle:
+    """A live provider-side context cache a request can reference instead of re-sending a prefix.
+
+    Returned by a :class:`~parcus.ports.ContextCacheRegistrar` for the ``EXPLICIT_CONTEXT_API``
+    caching model (Gemini ``cachedContents``): instead of re-sending a large stable prefix inline
+    every turn, the request references ``name`` and the provider bills the cached tokens at a
+    discount. Provider-agnostic (no SDK type leaks into the core). The handle ``name`` is an opaque
+    reference, **not** a secret — but it is tenant-scoped confidential state (a handle is only valid
+    for the API key/project that created it), so it is stored and accessed under the same
+    per-tenant rules as cache rows. See ``docs/adr/0010-gemini-context-cache-adapter.md``.
+
+    Args:
+        name: Opaque provider resource name (e.g. ``"cachedContents/abc123"``).
+        model: The model the cache was registered for — a handle is model-specific.
+        expires_at: Unix timestamp (seconds) at/after which the cache is considered expired. The
+            provider is the ultimate authority on TTL; the registrar tracks this conservatively so
+            it never references a cache the provider has already dropped.
+    """
+
+    name: str
+    model: str
+    expires_at: float
+
+    def is_expired(self, now: float) -> bool:
+        """Return whether the cache has expired as of ``now`` (Unix seconds)."""
+        return now >= self.expires_at
 
 
 @dataclass(frozen=True, slots=True)

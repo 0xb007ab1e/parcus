@@ -54,6 +54,7 @@ learned = ["llmlingua>=0.2"]
 graph = ["sqlite-vec>=0.1", "networkx>=3.3"]
 embeddings = ["sentence-transformers>=2.7"]  # local semantic retrieval (lazy, opt-in)
 encryption = ["cryptography>=42"]            # AES-256-GCM at-rest cache encryption (opt-in)
+gemini = ["google-genai>=1.0"]              # Gemini explicit context caching (opt-in; ADR 0010)
 dev = [
   "pytest>=8.2",
   "pytest-asyncio>=0.23",
@@ -124,7 +125,7 @@ files = ["src", "tests"]
 
 # Optional extras have no type stubs; don't fail typing when they're absent.
 [[tool.mypy.overrides]]
-module = ["sentence_transformers.*", "sqlite_vec.*", "llmlingua.*"]
+module = ["sentence_transformers.*", "sqlite_vec.*", "llmlingua.*", "google.*"]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------
