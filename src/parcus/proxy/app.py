@@ -48,8 +48,25 @@ __all__ = ["create_app"]
 _STREAM_TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 
 
-def _is_stream(body: bytes) -> bool:
-    """Return whether the request body opts into a streaming response."""
+def _streams_by_path(path: str) -> bool:
+    """Return whether ``path`` is a streaming endpoint identified by its suffix.
+
+    Some providers select streaming by the endpoint rather than a body flag — Gemini's
+    ``…:streamGenerateContent`` (paired with ``?alt=sse``). Recognising it here keeps such
+    requests on the streaming path so their response is relayed unbuffered.
+    """
+    return path.endswith(":streamGenerateContent")
+
+
+def _is_stream(path: str, body: bytes) -> bool:
+    """Return whether the request opts into a streaming response, by path or body flag.
+
+    Either signal ⇒ stream: a streaming endpoint path (Gemini) or an explicit ``stream: true`` in
+    the JSON body (Anthropic/OpenAI). Erring toward "stream" is the safe choice — buffering a
+    response the client expects to stream would break the harness.
+    """
+    if _streams_by_path(path):
+        return True
     try:
         decoded = json.loads(body)
     except (ValueError, UnicodeDecodeError):
@@ -102,13 +119,15 @@ async def _stream_passthrough(
     path: str,
     headers: list[tuple[str, str]],
     body: bytes,
+    query: str = "",
 ) -> Response:
     """Proxy a streaming request: forward the COMPRESSED request body, stream the response back.
 
     The request payload is compressed (and authorized + rate-limited) via
     :meth:`ProxyEngine.prepare_stream`; the SSE response is relayed byte-for-byte and unbuffered.
+    ``query`` is forwarded verbatim so streaming selectors like Gemini's ``?alt=sse`` survive.
     """
-    plan = engine.prepare_stream(detect(path), path, headers, body)
+    plan = engine.prepare_stream(detect(path), path, headers, body, query=query)
     if plan.early is not None:
         return _result_to_response(plan.early)
     client: httpx.AsyncClient = app.state.stream_client
@@ -176,11 +195,12 @@ def create_app(
             return PlainTextResponse(text, media_type="text/plain; version=0.0.4")
         body = await request.body()
         headers = list(request.headers.items())
-        if _is_stream(body):
+        query = request.url.query
+        if _is_stream(request.url.path, body):
             return await _stream_passthrough(
-                request.app, engine, request.method, request.url.path, headers, body
+                request.app, engine, request.method, request.url.path, headers, body, query
             )
-        result = await engine.handle(request.method, request.url.path, headers, body)
+        result = await engine.handle(request.method, request.url.path, headers, body, query=query)
         return _result_to_response(result)
 
     return app

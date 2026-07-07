@@ -169,6 +169,18 @@ class ProxyEngine:
         self._summarizer = summarizer or ExtractiveSummarizer()
         self._prefix_seen = prefix_seen or PrefixSeenSet()
 
+    @staticmethod
+    def _upstream_url(base: str, path: str, query: str) -> str:
+        """Join the routed base URL with the request path, preserving any query string.
+
+        The query is forwarded verbatim (e.g. Gemini's ``?alt=sse``, which selects SSE framing —
+        dropping it would break the stream). The host is fixed by :meth:`route`, so appending the
+        client-supplied path + query adds no SSRF surface beyond the path forwarding that already
+        happens (redirects are never followed).
+        """
+        url = base.rstrip("/") + path
+        return f"{url}?{query}" if query else url
+
     def route(self, dialect: Dialect, headers: list[tuple[str, str]]) -> str | None:
         """Return the upstream base URL for a request, or ``None`` if it cannot be routed."""
         if dialect is Dialect.ANTHROPIC:
@@ -183,7 +195,13 @@ class ProxyEngine:
         return None
 
     def prepare_stream(
-        self, dialect: Dialect, path: str, headers: list[tuple[str, str]], body: bytes
+        self,
+        dialect: Dialect,
+        path: str,
+        headers: list[tuple[str, str]],
+        body: bytes,
+        *,
+        query: str = "",
     ) -> StreamPlan:
         """Authorize, rate-limit, and **compress** a streaming request for forwarding.
 
@@ -210,7 +228,7 @@ class ProxyEngine:
                 forward_headers=(),
                 meta=meta,
             )
-        url = base.rstrip("/") + path
+        url = self._upstream_url(base, path, query)
         scoped = self._config.multi_tenant or bool(self._config.allowed_tenants)
         tenant = derive_tenant(headers, salt=self._config.salt) if scoped else ""
         if tenant:
@@ -266,11 +284,17 @@ class ProxyEngine:
         )
 
     async def handle(
-        self, method: str, path: str, headers: list[tuple[str, str]], body: bytes
+        self,
+        method: str,
+        path: str,
+        headers: list[tuple[str, str]],
+        body: bytes,
+        *,
+        query: str = "",
     ) -> ProxyResult:
         """Process one request and emit a savings metric (best-effort) around the core handler."""
         start = time.monotonic()
-        result = await self._handle(method, path, headers, body)
+        result = await self._handle(method, path, headers, body, query=query)
         meta = result.meta
         self._metrics.record(
             SavingsEvent(
@@ -290,7 +314,13 @@ class ProxyEngine:
         return result
 
     async def _handle(
-        self, method: str, path: str, headers: list[tuple[str, str]], body: bytes
+        self,
+        method: str,
+        path: str,
+        headers: list[tuple[str, str]],
+        body: bytes,
+        *,
+        query: str = "",
     ) -> ProxyResult:
         """Process one buffered request end-to-end and return the result."""
         dialect = detect(path)
@@ -303,7 +333,7 @@ class ProxyEngine:
                 meta={"routed": False},
             )
 
-        url = base.rstrip("/") + path
+        url = self._upstream_url(base, path, query)
         out_body = body
         meta: dict[str, Any] = {"dialect": dialect.value, "cache": "off"}
         cache_key: str | None = None

@@ -60,6 +60,42 @@ def test_non_streaming_request_is_proxied_and_compressed() -> None:
     assert json.loads(up.last.content)["messages"][0]["content"] == "hi\n\n"
 
 
+def test_non_streaming_request_forwards_query_string() -> None:
+    # End-to-end: a query on the inbound request survives FastAPI → engine → upstream URL
+    # (multi-param, to confirm _upstream_url is a verbatim concatenation, not a rebuild).
+    up = FakeUpstream(
+        UpstreamResponse(200, (("content-type", "application/json"),), b'{"ok":true}')
+    )
+    with TestClient(create_app(_engine(up))) as client:
+        response = client.post(
+            "/v1/messages?beta=true&x=1",
+            json={"model": "m", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"x-api-key": "k"},
+        )
+    assert response.status_code == 200
+    assert up.last is not None
+    assert up.last.url == "https://a.test/v1/messages?beta=true&x=1"
+
+
+@respx.mock
+def test_streaming_request_forwards_query_string() -> None:
+    # The streaming path must forward the query too — ?alt=sse is load-bearing for Gemini SSE.
+    route = respx.post("https://a.test/v1/messages").mock(
+        return_value=httpx.Response(
+            200, content=b"event: ping\n\n", headers={"content-type": "text/event-stream"}
+        )
+    )
+    up = FakeUpstream(UpstreamResponse(200, (), b""))  # unused on the streaming path
+    with TestClient(create_app(_engine(up))) as client:
+        response = client.post(
+            "/v1/messages?alt=sse",
+            json={"model": "m", "stream": True, "messages": [{"role": "user", "content": "hi"}]},
+            headers={"x-api-key": "k"},
+        )
+    assert response.status_code == 200
+    assert route.calls.last.request.url.query == b"alt=sse"
+
+
 @respx.mock
 def test_streaming_request_is_passed_through() -> None:
     respx.post("https://a.test/v1/messages").mock(

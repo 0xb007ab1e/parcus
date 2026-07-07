@@ -208,12 +208,22 @@ class TestRoutingAndDetection:
         assert out.status_code == 502
         assert client.request is None  # no upstream request was ever built/sent
 
-    def test_is_stream_detection(self) -> None:
-        assert _is_stream(b'{"stream": true}') is True
-        assert _is_stream(b'{"stream": false}') is False
-        assert _is_stream(b'{"model": "m"}') is False
-        assert _is_stream(b"not json") is False
-        assert _is_stream(b"[1, 2, 3]") is False  # valid JSON but not an object
+    def test_is_stream_detection_by_body_flag(self) -> None:
+        p = "/v1/messages"
+        assert _is_stream(p, b'{"stream": true}') is True
+        assert _is_stream(p, b'{"stream": false}') is False
+        assert _is_stream(p, b'{"model": "m"}') is False
+        assert _is_stream(p, b"not json") is False
+        assert _is_stream(p, b"[1, 2, 3]") is False  # valid JSON but not an object
+
+    def test_is_stream_detection_by_path(self) -> None:
+        # A streaming endpoint (Gemini) streams regardless of the body — even an absent/false flag
+        # or unparseable body must not be buffered.
+        stream_path = "/v1beta/models/gemini-2.5-flash:streamGenerateContent"
+        assert _is_stream(stream_path, b"") is True
+        assert _is_stream(stream_path, b'{"stream": false}') is True
+        # The non-streaming Gemini endpoint is not a streaming path.
+        assert _is_stream("/v1beta/models/gemini-2.5-flash:generateContent", b"{}") is False
 
 
 def _stream_body(content: str) -> bytes:

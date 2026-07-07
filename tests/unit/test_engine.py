@@ -6,7 +6,7 @@ import json
 
 from parcus.cache import CachePolicy, SqliteCache
 from parcus.compress import LosslessCompressor
-from parcus.model import CanonicalRequest, CompressionStats, Message
+from parcus.model import CanonicalRequest, CompressionStats, Dialect, Message
 from parcus.proxy.engine import EngineConfig, ProxyEngine
 from parcus.proxy.upstream import UpstreamRequest, UpstreamResponse
 from parcus.redact import Redactor
@@ -351,6 +351,39 @@ class TestCacheInjection:
         await eng.handle("POST", "/v1/chat/completions", [("authorization", "Bearer k")], body)
         sent = json.loads(up.last.content)
         assert sent["messages"][0]["content"] == "a"  # OpenAI = automatic-prefix → no injection
+
+
+class TestQueryPreservation:
+    """The request query string is forwarded verbatim (e.g. Gemini's ``?alt=sse``)."""
+
+    async def test_query_is_appended_to_upstream_url(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(up, cache_enabled=False)
+        await eng.handle(
+            "POST", "/v1/messages", [("x-api-key", "k")], _anthropic("hi"), query="alt=sse"
+        )
+        assert up.last is not None
+        assert up.last.url == "https://a.test/v1/messages?alt=sse"
+
+    async def test_no_query_forwards_bare_path(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(up, cache_enabled=False)
+        await eng.handle("POST", "/v1/messages", [("x-api-key", "k")], _anthropic("hi"))
+        assert up.last is not None
+        assert up.last.url == "https://a.test/v1/messages"
+
+    def test_prepare_stream_preserves_query(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(up, cache_enabled=False)
+        plan = eng.prepare_stream(
+            Dialect.ANTHROPIC,
+            "/v1/messages",
+            [("x-api-key", "k")],
+            _anthropic("hi"),
+            query="alt=sse",
+        )
+        assert plan.early is None
+        assert plan.url == "https://a.test/v1/messages?alt=sse"
 
 
 class TestForwardingAndCompression:
