@@ -157,30 +157,34 @@ class ContextCacheRegistrar(Protocol):
 
     Implementations MUST **fail open**: :meth:`ensure` returns ``None`` (⇒ forward the prefix
     inline, uncached) on any error, a below-worthwhile prefix, a spend-cap hit, or a miss it can't
-    create; :meth:`evict_expired` no-ops on error. Handles MUST be scoped per ``(tenant, model,
-    prefix)`` so a cache is never shared across tenants or models (a handle is only valid for the
-    credential/project that created it). Since this changes only billing/transport and never
-    request or response content, it needs no answer-preservation gate.
+    create; :meth:`evict_expired` no-ops on error. A handle is only valid for the **credential**
+    that created it, so implementations MUST scope handles per ``(credential, model, prefix)`` (by
+    a credential *fingerprint* — never the raw key) so one caller can never reference another's
+    cache, even in single-tenant mode. Since this changes only billing/transport and never request
+    or response content, it needs no answer-preservation gate.
 
     The methods are **async**: the engine forward path is async and the provider client does
     network I/O, so a registrar call must not block the event loop. Staying on the loop (rather
     than a threadpool) also keeps the handle state single-tasked and lock-free. See
-    ``docs/adr/0010-gemini-context-cache-adapter.md`` (Update 2026-07-04).
+    ``docs/adr/0010-gemini-context-cache-adapter.md`` (Updates 2026-07-04 / 2026-07-07).
     """
 
     async def ensure(
-        self, prefix: str, *, model: str | None, tenant: str = ""
+        self, prefix: str, *, model: str | None, credential: str
     ) -> ContextCacheHandle | None:
-        """Return a live handle for ``prefix`` under ``(tenant, model)``, creating one if useful.
+        """Return a live handle for ``prefix`` under the caller's ``credential`` (create if useful).
 
-        ``None`` means "not cached — forward the prefix inline," always the safe, fail-open answer
-        (a fresh, expired, spend-capped, or errored lookup all resolve to ``None``). Side-effectful
-        (may call the provider and persist the handle) but MUST NOT raise.
+        ``credential`` is the caller's provider API key: a provider-blind proxy has no key of its
+        own, and a cache handle is only valid for the key that created it, so ``create`` runs under
+        it and handles are fingerprint-scoped by it. The raw key is used transiently and MUST NOT
+        be stored in a handle or logged. ``None`` means "not cached — forward the prefix inline,"
+        always the safe, fail-open answer (a fresh, expired, spend-capped, or errored lookup all
+        resolve to ``None``). Side-effectful but MUST NOT raise.
         """
         ...
 
     async def evict_expired(self) -> None:
-        """Delete provider caches whose tracked TTL has lapsed to bound cost; never raises."""
+        """Prune handles whose tracked TTL has lapsed (the remote cache lapses on the provider)."""
         ...
 
 

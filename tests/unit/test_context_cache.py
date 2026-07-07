@@ -2,10 +2,10 @@
 
 Covers the ``ContextCacheHandle`` value type, the fail-open ``NullContextCacheRegistrar`` default,
 and the ``GeminiContextCacheRegistrar`` lifecycle policy (reuse, expiry-as-miss, spend cap,
-fail-open on I/O error, TTL eviction) driven through **injected async** create/delete fakes so no
-provider/network is touched. The registrar port is async (ADR 0010 Update 2026-07-04); the real
-``google-genai`` wiring in ``gemini_registrar`` is ``# pragma: no cover`` (needs the extra + a
-live key).
+credential/model scoping, fail-open on I/O error, local pruning) driven through an **injected
+async** ``create`` fake so no provider/network is touched. The registrar is async and
+credential-scoped (ADR 0010 Updates 2026-07-04 / 2026-07-07); the real ``google-genai`` wiring in
+``gemini_registrar`` is ``# pragma: no cover`` (needs the extra + a live key).
 """
 
 from __future__ import annotations
@@ -16,6 +16,9 @@ from parcus.cache.context_cache import (
 )
 from parcus.model import ContextCacheHandle
 from parcus.ports import ContextCacheRegistrar
+
+KEY_A = "AIza-caller-a"
+KEY_B = "AIza-caller-b"
 
 
 class FakeClock:
@@ -31,42 +34,30 @@ class FakeClock:
         self.t += seconds
 
 
-class RecordingProvider:
-    """Fake async create/delete I/O: hands out deterministic names and records delete calls."""
+class RecordingCreator:
+    """Fake async create I/O: records (prefix, model, credential) and hands out unique names."""
 
     def __init__(self) -> None:
-        self.created: list[tuple[str, str | None]] = []
-        self.deleted: list[str] = []
+        self.calls: list[tuple[str, str | None, str]] = []
         self._n = 0
 
-    async def create(self, prefix: str, model: str | None) -> str:
-        self.created.append((prefix, model))
+    async def create(self, prefix: str, model: str | None, credential: str) -> str:
+        self.calls.append((prefix, model, credential))
         self._n += 1
         return f"cachedContents/{self._n}"
 
-    async def delete(self, name: str) -> None:
-        self.deleted.append(name)
 
-
-async def _raise_create(prefix: str, model: str | None) -> str:
+async def _raise_create(prefix: str, model: str | None, credential: str) -> str:
     raise RuntimeError("provider 500")
 
 
-async def _raise_delete(name: str) -> None:
-    raise RuntimeError("delete failed")
-
-
-async def _const_create(prefix: str, model: str | None) -> str:
-    return "cachedContents/1"
-
-
-async def _noop_delete(name: str) -> None:
-    return None
+async def _const_create(prefix: str, model: str | None, credential: str) -> str:
+    return "cachedContents/x"
 
 
 def _gemini(
     clock: FakeClock,
-    provider: RecordingProvider,
+    creator: RecordingCreator,
     *,
     ttl_seconds: int = 100,
     max_entries: int = 64,
@@ -75,8 +66,7 @@ def _gemini(
         clock=clock,
         ttl_seconds=ttl_seconds,
         max_entries=max_entries,
-        create=provider.create,
-        delete=provider.delete,
+        create=creator.create,
     )
 
 
@@ -103,8 +93,11 @@ class TestContextCacheHandle:
 class TestNullContextCacheRegistrar:
     async def test_ensure_always_none(self) -> None:
         reg = NullContextCacheRegistrar()
-        assert await reg.ensure("a long stable prefix", model="gemini-2.5-flash") is None
-        assert await reg.ensure("x", model=None, tenant="t1") is None
+        assert (
+            await reg.ensure("a long stable prefix", model="gemini-2.5-flash", credential=KEY_A)
+            is None
+        )
+        assert await reg.ensure("x", model=None, credential=KEY_B) is None
 
     async def test_evict_is_noop(self) -> None:
         assert await NullContextCacheRegistrar().evict_expired() is None
@@ -115,115 +108,107 @@ class TestNullContextCacheRegistrar:
 
 class TestGeminiRegistrarCreateAndReuse:
     async def test_creates_on_first_miss(self) -> None:
-        clock, provider = FakeClock(), RecordingProvider()
-        reg = _gemini(clock, provider)
-        handle = await reg.ensure("PREFIX", model="gemini-2.5-flash", tenant="t1")
+        clock, creator = FakeClock(), RecordingCreator()
+        reg = _gemini(clock, creator)
+        handle = await reg.ensure("PREFIX", model="gemini-2.5-flash", credential=KEY_A)
         assert handle is not None
         assert handle.name == "cachedContents/1"
         assert handle.model == "gemini-2.5-flash"
         assert handle.expires_at == 1100.0  # now(1000) + ttl(100)
-        assert provider.created == [("PREFIX", "gemini-2.5-flash")]
+        assert creator.calls == [("PREFIX", "gemini-2.5-flash", KEY_A)]  # created under caller key
 
     async def test_reuses_live_handle_without_recreating(self) -> None:
-        clock, provider = FakeClock(), RecordingProvider()
-        reg = _gemini(clock, provider)
-        first = await reg.ensure("PREFIX", model="m", tenant="t1")
+        clock, creator = FakeClock(), RecordingCreator()
+        reg = _gemini(clock, creator)
+        first = await reg.ensure("PREFIX", model="m", credential=KEY_A)
         clock.advance(50)  # still within the 100s TTL
-        second = await reg.ensure("PREFIX", model="m", tenant="t1")
+        second = await reg.ensure("PREFIX", model="m", credential=KEY_A)
         assert second == first
-        assert len(provider.created) == 1  # no second create
+        assert len(creator.calls) == 1  # no second create
 
     async def test_expired_handle_is_recreated(self) -> None:
-        clock, provider = FakeClock(), RecordingProvider()
-        reg = _gemini(clock, provider)
-        await reg.ensure("PREFIX", model="m", tenant="t1")
+        clock, creator = FakeClock(), RecordingCreator()
+        reg = _gemini(clock, creator)
+        await reg.ensure("PREFIX", model="m", credential=KEY_A)
         clock.advance(150)  # past the 100s TTL
-        again = await reg.ensure("PREFIX", model="m", tenant="t1")
+        again = await reg.ensure("PREFIX", model="m", credential=KEY_A)
         assert again is not None
         assert again.name == "cachedContents/2"
-        assert len(provider.created) == 2
+        assert len(creator.calls) == 2
 
 
 class TestGeminiRegistrarScoping:
-    async def test_distinct_tenants_get_distinct_handles(self) -> None:
-        clock, provider = FakeClock(), RecordingProvider()
-        reg = _gemini(clock, provider)
-        a = await reg.ensure("PREFIX", model="m", tenant="t1")
-        b = await reg.ensure("PREFIX", model="m", tenant="t2")
-        assert a is not None and b is not None and a.name != b.name  # never shared across tenants
+    async def test_distinct_credentials_get_distinct_handles(self) -> None:
+        # The core isolation guarantee: two callers' keys never share a handle (even same prefix).
+        clock, creator = FakeClock(), RecordingCreator()
+        reg = _gemini(clock, creator)
+        a = await reg.ensure("PREFIX", model="m", credential=KEY_A)
+        b = await reg.ensure("PREFIX", model="m", credential=KEY_B)
+        assert a is not None and b is not None and a.name != b.name
 
     async def test_distinct_models_get_distinct_handles(self) -> None:
-        clock, provider = FakeClock(), RecordingProvider()
-        reg = _gemini(clock, provider)
-        a = await reg.ensure("PREFIX", model="m1", tenant="t1")
-        b = await reg.ensure("PREFIX", model="m2", tenant="t1")
+        clock, creator = FakeClock(), RecordingCreator()
+        reg = _gemini(clock, creator)
+        a = await reg.ensure("PREFIX", model="m1", credential=KEY_A)
+        b = await reg.ensure("PREFIX", model="m2", credential=KEY_A)
         assert a is not None and b is not None and a.name != b.name
 
     async def test_none_model_is_handled(self) -> None:
-        clock, provider = FakeClock(), RecordingProvider()
-        reg = _gemini(clock, provider)
-        handle = await reg.ensure("PREFIX", model=None, tenant="t1")
+        clock, creator = FakeClock(), RecordingCreator()
+        reg = _gemini(clock, creator)
+        handle = await reg.ensure("PREFIX", model=None, credential=KEY_A)
         assert handle is not None
         assert handle.model == ""  # normalised
 
 
 class TestGeminiRegistrarSpendCap:
     async def test_cap_blocks_new_creation_but_serves_existing(self) -> None:
-        clock, provider = FakeClock(), RecordingProvider()
-        reg = _gemini(clock, provider, max_entries=1)
-        first = await reg.ensure("PREFIX-A", model="m", tenant="t1")
+        clock, creator = FakeClock(), RecordingCreator()
+        reg = _gemini(clock, creator, max_entries=1)
+        first = await reg.ensure("PREFIX-A", model="m", credential=KEY_A)
         # A different prefix would be a 2nd live cache — capped → fail open (inline send).
-        assert await reg.ensure("PREFIX-B", model="m", tenant="t1") is None
+        assert await reg.ensure("PREFIX-B", model="m", credential=KEY_A) is None
         # The already-registered prefix is still served from the held handle.
-        assert await reg.ensure("PREFIX-A", model="m", tenant="t1") == first
-        assert len(provider.created) == 1
+        assert await reg.ensure("PREFIX-A", model="m", credential=KEY_A) == first
+        assert len(creator.calls) == 1
 
     async def test_cap_frees_after_expiry(self) -> None:
-        clock, provider = FakeClock(), RecordingProvider()
-        reg = _gemini(clock, provider, max_entries=1)
-        await reg.ensure("PREFIX-A", model="m", tenant="t1")
+        clock, creator = FakeClock(), RecordingCreator()
+        reg = _gemini(clock, creator, max_entries=1)
+        await reg.ensure("PREFIX-A", model="m", credential=KEY_A)
         clock.advance(150)  # A expires → no longer counts against the cap
-        assert await reg.ensure("PREFIX-B", model="m", tenant="t1") is not None
+        assert await reg.ensure("PREFIX-B", model="m", credential=KEY_A) is not None
 
 
 class TestGeminiRegistrarFailOpen:
     async def test_create_error_returns_none(self) -> None:
         reg = GeminiContextCacheRegistrar(
-            clock=FakeClock(),
-            ttl_seconds=100,
-            max_entries=64,
-            create=_raise_create,
-            delete=_noop_delete,
+            clock=FakeClock(), ttl_seconds=100, max_entries=64, create=_raise_create
         )
-        assert await reg.ensure("PREFIX", model="m", tenant="t1") is None  # fail open, never raises
+        assert await reg.ensure("PREFIX", model="m", credential=KEY_A) is None  # never raises
 
 
-class TestGeminiRegistrarEviction:
-    async def test_evict_deletes_only_expired(self) -> None:
-        clock, provider = FakeClock(), RecordingProvider()
-        reg = _gemini(clock, provider, ttl_seconds=100)
-        await reg.ensure("OLD", model="m", tenant="t1")  # expires at 1100
-        clock.advance(60)  # now 1060
-        await reg.ensure("NEW", model="m", tenant="t1")  # expires at 1160
-        clock.advance(60)  # now 1120 — OLD expired, NEW still live
-        await reg.evict_expired()
-        assert provider.deleted == ["cachedContents/1"]  # only OLD deleted
-        # NEW is still served without a re-create.
-        assert await reg.ensure("NEW", model="m", tenant="t1") is not None
-        assert len(provider.created) == 2
+class TestGeminiRegistrarPruning:
+    async def test_evict_drops_expired_and_frees_capacity(self) -> None:
+        clock, creator = FakeClock(), RecordingCreator()
+        reg = _gemini(clock, creator, ttl_seconds=100, max_entries=2)
+        await reg.ensure("OLD", model="m", credential=KEY_A)  # expires at 1100
+        clock.advance(150)  # now 1150 — OLD expired
+        await reg.evict_expired()  # prunes OLD locally (no remote call)
+        # A fresh prefix now creates cleanly (map no longer holds the dead OLD entry).
+        assert await reg.ensure("NEW", model="m", credential=KEY_A) is not None
+        assert len(creator.calls) == 2
 
-    async def test_evict_swallows_delete_errors(self) -> None:
-        clock = FakeClock()
-        reg = GeminiContextCacheRegistrar(
-            clock=clock,
-            ttl_seconds=100,
-            max_entries=64,
-            create=_const_create,
-            delete=_raise_delete,
-        )
-        await reg.ensure("OLD", model="m", tenant="t1")
-        clock.advance(150)
-        await reg.evict_expired()  # must not raise despite the delete error
+    async def test_ensure_opportunistically_prunes_expired(self) -> None:
+        # With no evict call, ensure() itself keeps the map bounded once len exceeds cap*factor
+        # (=4 here): the prune runs at the top of the ensure *after* the map has grown past it.
+        clock, creator = FakeClock(), RecordingCreator()
+        reg = _gemini(clock, creator, ttl_seconds=100, max_entries=1)
+        for i in range(6):
+            await reg.ensure(f"P{i}", model="m", credential=KEY_A)
+            clock.advance(200)  # each entry expires before the next ensure
+        # The 6th ensure saw len=5 (>4) and pruned all the expired entries before creating.
+        assert len(reg._handles) <= 2  # bounded, not 6
 
 
 # --- Structural conformance to the port -------------------------------------------------------
@@ -232,10 +217,6 @@ class TestGeminiRegistrarEviction:
 def test_registrars_satisfy_the_port() -> None:
     assert isinstance(NullContextCacheRegistrar(), ContextCacheRegistrar)
     reg = GeminiContextCacheRegistrar(
-        clock=FakeClock(),
-        ttl_seconds=100,
-        max_entries=64,
-        create=_const_create,
-        delete=_noop_delete,
+        clock=FakeClock(), ttl_seconds=100, max_entries=64, create=_const_create
     )
     assert isinstance(reg, ContextCacheRegistrar)
