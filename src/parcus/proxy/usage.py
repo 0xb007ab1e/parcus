@@ -11,6 +11,9 @@ Provider shapes (Messages / Chat Completions ``usage`` objects):
   ``cache_creation_input_tokens``.
 * **OpenAI:** ``prompt_tokens``, ``completion_tokens``, ``prompt_tokens_details.cached_tokens``
   (no cache-write concept → 0).
+* **Gemini:** a ``usageMetadata`` object (not ``usage``) with ``promptTokenCount``,
+  ``candidatesTokenCount``, ``cachedContentTokenCount`` (context-cache read; no cache-write
+  count → 0).
 """
 
 from __future__ import annotations
@@ -41,7 +44,7 @@ def parse_usage(dialect: Dialect, content: bytes) -> ProviderUsage | None:
         content: The raw response body bytes.
 
     Returns:
-        The parsed usage, or ``None`` if the body isn't JSON, has no ``usage`` object, or the
+        The parsed usage, or ``None`` if the body isn't JSON, has no usage object, or the
         dialect is unknown. Never raises.
     """
     try:
@@ -50,10 +53,19 @@ def parse_usage(dialect: Dialect, content: bytes) -> ProviderUsage | None:
         return None
     if not isinstance(decoded, dict):
         return None
-    usage = decoded.get("usage")
+    # Gemini reports under ``usageMetadata``; Anthropic/OpenAI under ``usage``.
+    usage_key = "usageMetadata" if dialect is Dialect.GEMINI else "usage"
+    usage = decoded.get(usage_key)
     if not isinstance(usage, dict):
         return None
 
+    if dialect is Dialect.GEMINI:
+        return ProviderUsage(
+            input_tokens=_int(usage.get("promptTokenCount")),
+            output_tokens=_int(usage.get("candidatesTokenCount")),
+            cache_read_tokens=_int(usage.get("cachedContentTokenCount")),
+            cache_write_tokens=0,  # Gemini has no separate cache-write count
+        )
     if dialect is Dialect.ANTHROPIC:
         return ProviderUsage(
             input_tokens=_int(usage.get("input_tokens")),

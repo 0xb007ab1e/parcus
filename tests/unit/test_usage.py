@@ -40,6 +40,17 @@ _OPENAI_BODY = json.dumps(
         },
     }
 ).encode()
+_GEMINI_BODY = json.dumps(
+    {
+        "candidates": [{"content": {"parts": [{"text": "hi"}]}}],
+        "usageMetadata": {
+            "promptTokenCount": 300,
+            "candidatesTokenCount": 70,
+            "cachedContentTokenCount": 250,
+            "totalTokenCount": 370,
+        },
+    }
+).encode()
 
 
 class TestParseUsage:
@@ -54,6 +65,25 @@ class TestParseUsage:
         assert u == ProviderUsage(
             input_tokens=200, output_tokens=60, cache_read_tokens=150, cache_write_tokens=0
         )
+
+    def test_gemini_full(self) -> None:
+        # Gemini reports under usageMetadata (not usage); cachedContentTokenCount is the
+        # context-cache read, and there is no separate cache-write count.
+        u = parse_usage(Dialect.GEMINI, _GEMINI_BODY)
+        assert u == ProviderUsage(
+            input_tokens=300, output_tokens=70, cache_read_tokens=250, cache_write_tokens=0
+        )
+
+    def test_gemini_without_cache_field_defaults_zero(self) -> None:
+        body = json.dumps(
+            {"usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5}}
+        ).encode()
+        u = parse_usage(Dialect.GEMINI, body)
+        assert u == ProviderUsage(input_tokens=10, output_tokens=5, cache_read_tokens=0)
+
+    def test_gemini_missing_usage_metadata_is_none(self) -> None:
+        # An Anthropic-style `usage` object must NOT be read for Gemini (wrong key).
+        assert parse_usage(Dialect.GEMINI, _ANTHROPIC_BODY) is None
 
     def test_anthropic_without_cache_fields_defaults_zero(self) -> None:
         body = json.dumps({"usage": {"input_tokens": 10, "output_tokens": 5}}).encode()

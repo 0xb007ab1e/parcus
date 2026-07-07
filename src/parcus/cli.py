@@ -155,6 +155,7 @@ def build_engine(settings: Settings, *, metrics: MetricsSink | None = None) -> P
         config=EngineConfig(
             anthropic_upstream=settings.anthropic_upstream,
             openai_upstream=settings.openai_upstream,
+            gemini_upstream=settings.gemini_upstream,
             cache_enabled=settings.cache,
             cache_ttl_seconds=settings.cache_ttl_seconds,
             salt=settings.salt,

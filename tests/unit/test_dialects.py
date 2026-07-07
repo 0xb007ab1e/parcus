@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from parcus.model import CanonicalRequest, Dialect, Message, Role, Span
-from parcus.proxy.dialects import detect, parse, serialize
+from parcus.proxy.dialects import detect, gemini_model_from_path, parse, serialize
 
 
 class TestDetect:
@@ -13,8 +13,39 @@ class TestDetect:
     def test_openai(self) -> None:
         assert detect("/v1/chat/completions") is Dialect.OPENAI
 
+    def test_gemini_generate(self) -> None:
+        assert detect("/v1beta/models/gemini-2.5-flash:generateContent") is Dialect.GEMINI
+
+    def test_gemini_stream(self) -> None:
+        assert detect("/v1beta/models/gemini-2.5-flash:streamGenerateContent") is Dialect.GEMINI
+
     def test_unknown(self) -> None:
         assert detect("/v1/models") is Dialect.UNKNOWN
+
+
+class TestGeminiModelFromPath:
+    def test_extracts_model(self) -> None:
+        assert gemini_model_from_path("/v1beta/models/gemini-2.5-flash:generateContent") == (
+            "gemini-2.5-flash"
+        )
+
+    def test_extracts_model_stream(self) -> None:
+        assert gemini_model_from_path("/v1beta/models/gemini-2.5-pro:streamGenerateContent") == (
+            "gemini-2.5-pro"
+        )
+
+    def test_extracts_tuned_model(self) -> None:
+        # Tuned models live under /tunedModels/, not /models/ — must still isolate by id.
+        assert gemini_model_from_path("/v1beta/tunedModels/my-model:generateContent") == "my-model"
+
+    def test_no_colon_method(self) -> None:
+        assert gemini_model_from_path("/v1/messages") is None
+
+    def test_no_method_suffix(self) -> None:
+        assert gemini_model_from_path("/v1beta/models/gemini-2.5-flash") is None
+
+    def test_empty_model(self) -> None:
+        assert gemini_model_from_path("/v1beta/models/:generateContent") is None
 
 
 class TestParseAnthropic:
@@ -255,3 +286,160 @@ class TestSerializeCacheBreakpoint:
             {"role": "user", "content": "a"},
             {"role": "user", "content": "b"},
         ]
+
+
+def _gemini_body(
+    *,
+    contents: list[dict[str, object]],
+    system: dict[str, object] | None = None,
+    extra: dict[str, object] | None = None,
+) -> dict[str, object]:
+    body: dict[str, object] = {"contents": contents}
+    if system is not None:
+        body["systemInstruction"] = system
+    if extra is not None:
+        body.update(extra)
+    return body
+
+
+class TestParseGemini:
+    def test_text_subset_with_system_and_model_from_path(self) -> None:
+        body = _gemini_body(
+            contents=[
+                {"role": "user", "parts": [{"text": "hello"}]},
+                {"role": "model", "parts": [{"text": "hi there"}]},
+            ],
+            system={"parts": [{"text": "be terse"}]},
+            extra={"tools": [{"functionDeclarations": []}]},
+        )
+        req = parse(Dialect.GEMINI, body, model="gemini-2.5-flash")
+        assert req is not None
+        assert req.dialect is Dialect.GEMINI
+        assert req.model == "gemini-2.5-flash"  # from the path, not the body
+        assert req.system == "be terse"
+        assert req.messages[0].role is Role.USER
+        assert req.messages[0].text == "hello"
+        assert req.messages[1].role is Role.ASSISTANT  # gemini "model" → assistant
+        assert req.messages[1].text == "hi there"
+        assert req.tools_json is not None
+        assert req.stream is False  # gemini streams by endpoint, not a body flag
+
+    def test_system_optional(self) -> None:
+        req = parse(
+            Dialect.GEMINI, _gemini_body(contents=[{"role": "user", "parts": [{"text": "x"}]}])
+        )
+        assert req is not None
+        assert req.system is None
+        assert req.model is None  # no model passed
+
+    def test_non_text_system_passes_through(self) -> None:
+        body = _gemini_body(
+            contents=[{"role": "user", "parts": [{"text": "x"}]}],
+            system={"parts": [{"inlineData": {"mimeType": "image/png", "data": "..."}}]},
+        )
+        assert parse(Dialect.GEMINI, body) is None
+
+    def test_multi_part_system_passes_through(self) -> None:
+        body = _gemini_body(
+            contents=[{"role": "user", "parts": [{"text": "x"}]}],
+            system={"parts": [{"text": "a"}, {"text": "b"}]},
+        )
+        assert parse(Dialect.GEMINI, body) is None
+
+    def test_missing_contents_passes_through(self) -> None:
+        assert parse(Dialect.GEMINI, {"systemInstruction": {"parts": [{"text": "s"}]}}) is None
+
+    def test_contents_not_a_list_passes_through(self) -> None:
+        assert parse(Dialect.GEMINI, {"contents": "nope"}) is None
+
+    def test_non_dict_content_item_passes_through(self) -> None:
+        assert parse(Dialect.GEMINI, {"contents": ["nope"]}) is None
+
+    def test_unknown_role_text_passes_through(self) -> None:
+        body = _gemini_body(contents=[{"role": "system", "parts": [{"text": "x"}]}])
+        assert parse(Dialect.GEMINI, body) is None  # only user/model are the text subset
+
+    def test_multi_part_turn_passes_through_when_not_structured(self) -> None:
+        body = _gemini_body(contents=[{"role": "user", "parts": [{"text": "a"}, {"text": "b"}]}])
+        assert parse(Dialect.GEMINI, body) is None
+
+    def test_non_text_part_passes_through_when_not_structured(self) -> None:
+        body = _gemini_body(
+            contents=[{"role": "user", "parts": [{"functionCall": {"name": "f", "args": {}}}]}]
+        )
+        assert parse(Dialect.GEMINI, body) is None
+
+    def test_non_dict_system_passes_through(self) -> None:
+        body = {"contents": [{"role": "user", "parts": [{"text": "x"}]}], "systemInstruction": "s"}
+        assert parse(Dialect.GEMINI, body) is None  # systemInstruction must be a Content object
+
+    def test_roleless_item_passes_through_when_not_structured(self) -> None:
+        # A content item without the exact {role, parts} shape isn't the text subset.
+        assert parse(Dialect.GEMINI, _gemini_body(contents=[{"parts": [{"text": "x"}]}])) is None
+
+    def test_roleless_item_carried_when_structured(self) -> None:
+        item = {"parts": [{"text": "x"}]}  # no role key → not text subset, but round-trippable
+        req = parse(Dialect.GEMINI, _gemini_body(contents=[item]), structured=True)
+        assert req is not None
+        assert req.messages[0].raw == item
+        assert req.messages[0].role is Role.USER  # default for the cache-key view
+
+
+class TestParseGeminiStructured:
+    def test_carries_tool_turn_verbatim(self) -> None:
+        tool_turn = {
+            "role": "model",
+            "parts": [{"functionCall": {"name": "sh", "args": {"cmd": "ls"}}}],
+        }
+        body = _gemini_body(contents=[{"role": "user", "parts": [{"text": "run it"}]}, tool_turn])
+        req = parse(Dialect.GEMINI, body, structured=True)
+        assert req is not None
+        assert req.messages[0].raw is None  # plain text turn → spans
+        assert req.messages[1].raw == tool_turn  # structured turn → verbatim
+        assert req.messages[1].role is Role.ASSISTANT
+
+    def test_unknown_role_structured_defaults_user_but_carries_raw(self) -> None:
+        weird = {"role": "function", "parts": [{"functionResponse": {"name": "f"}}]}
+        req = parse(Dialect.GEMINI, _gemini_body(contents=[weird]), structured=True)
+        assert req is not None
+        assert req.messages[0].raw == weird
+        assert req.messages[0].role is Role.USER  # cache-key view only; serialises from raw
+
+
+class TestSerializeGemini:
+    def test_text_round_trips(self) -> None:
+        body = _gemini_body(
+            contents=[
+                {"role": "user", "parts": [{"text": "hello"}]},
+                {"role": "model", "parts": [{"text": "hi"}]},
+            ],
+            system={"parts": [{"text": "sys"}]},
+            extra={"generationConfig": {"temperature": 0.2}},
+        )
+        req = parse(Dialect.GEMINI, body, model="gemini-2.5-flash")
+        assert req is not None
+        out = serialize(req, body)
+        assert out["contents"] == [
+            {"role": "user", "parts": [{"text": "hello"}]},
+            {"role": "model", "parts": [{"text": "hi"}]},
+        ]
+        assert out["systemInstruction"] == {"parts": [{"text": "sys"}]}
+        assert out["generationConfig"] == {"temperature": 0.2}  # untouched passthrough field
+
+    def test_no_system_leaves_no_system_instruction(self) -> None:
+        body = _gemini_body(contents=[{"role": "user", "parts": [{"text": "x"}]}])
+        req = parse(Dialect.GEMINI, body)
+        assert req is not None
+        out = serialize(req, body)
+        assert "systemInstruction" not in out
+
+    def test_structured_turn_round_trips_verbatim(self) -> None:
+        body = _gemini_body(
+            contents=[
+                {"role": "user", "parts": [{"text": "run"}]},
+                {"role": "model", "parts": [{"functionCall": {"name": "f", "args": {}}}]},
+            ]
+        )
+        req = parse(Dialect.GEMINI, body, structured=True)
+        assert req is not None
+        assert serialize(req, body) == body  # parse → serialize identity (modulo separators)

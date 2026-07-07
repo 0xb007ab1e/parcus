@@ -36,7 +36,7 @@ from parcus.model import (
 )
 from parcus.obs import MetricsSink, NullSink, SavingsEvent, StageStat
 from parcus.ports import CachePort, CompressorPort, MemoryPort, RedactorPort, TokenizerPort
-from parcus.proxy.dialects import detect, parse, serialize
+from parcus.proxy.dialects import detect, gemini_model_from_path, parse, serialize
 from parcus.proxy.upstream import UpstreamPort, UpstreamRequest, UpstreamResponse
 from parcus.proxy.usage import parse_usage
 from parcus.quota import RateLimiter
@@ -59,6 +59,7 @@ class EngineConfig:
     Args:
         anthropic_upstream: Base URL for Anthropic.
         openai_upstream: Base URL for OpenAI.
+        gemini_upstream: Base URL for Google Gemini (generativelanguage).
         cache_enabled: Whether the response cache is active.
         cache_ttl_seconds: TTL applied to stored responses.
         salt: Per-install salt for cache-key domain separation.
@@ -78,6 +79,7 @@ class EngineConfig:
 
     anthropic_upstream: str
     openai_upstream: str
+    gemini_upstream: str = "https://generativelanguage.googleapis.com"
     cache_enabled: bool = True
     cache_ttl_seconds: int = 86_400
     salt: str = ""
@@ -187,9 +189,13 @@ class ProxyEngine:
             return self._config.anthropic_upstream
         if dialect is Dialect.OPENAI:
             return self._config.openai_upstream
+        if dialect is Dialect.GEMINI:
+            return self._config.gemini_upstream
         lower = {k.lower(): v for k, v in headers}
         if "x-api-key" in lower or "anthropic-version" in lower:
             return self._config.anthropic_upstream
+        if "x-goog-api-key" in lower:
+            return self._config.gemini_upstream
         if "authorization" in lower:
             return self._config.openai_upstream
         return None
@@ -265,7 +271,7 @@ class ProxyEngine:
                     meta=meta,
                 )
         out_body = body
-        canonical = self._canonicalize(dialect, body)
+        canonical = self._canonicalize(dialect, body, path)
         if canonical is not None:
             working, memory_action = self._apply_memory(canonical, tenant)
             out_body, compressed, comp_stats = self._compress_request(working, body, tenant)
@@ -365,7 +371,7 @@ class ProxyEngine:
                     meta={**meta, "rate": "limited"},
                 )
 
-        canonical = self._canonicalize(dialect, body)
+        canonical = self._canonicalize(dialect, body, path)
         if canonical is not None:
             working, memory_action = self._apply_memory(canonical, tenant)
             out_body, compressed, comp_stats = self._compress_request(working, body, tenant)
@@ -435,7 +441,9 @@ class ProxyEngine:
         except Exception:
             return None
 
-    def _canonicalize(self, dialect: Dialect, body: bytes) -> CanonicalRequest | None:
+    def _canonicalize(
+        self, dialect: Dialect, body: bytes, path: str = ""
+    ) -> CanonicalRequest | None:
         if dialect is Dialect.UNKNOWN or not body:
             return None
         try:
@@ -444,7 +452,10 @@ class ProxyEngine:
             return None
         if not isinstance(decoded, dict):
             return None
-        return parse(dialect, decoded, structured=self._config.parse_structured)
+        # Gemini carries the model in the URL, not the body; fold it in so two models don't
+        # collide in the cache key. Other dialects read the model from the body (path ignored).
+        model = gemini_model_from_path(path) if dialect is Dialect.GEMINI else None
+        return parse(dialect, decoded, structured=self._config.parse_structured, model=model)
 
     def _apply_memory(
         self, canonical: CanonicalRequest, tenant: str
@@ -612,6 +623,11 @@ class ProxyEngine:
 
     def _maybe_cache_key(self, canonical: CanonicalRequest, tenant: str = "") -> str | None:
         if not self._config.cache_enabled or canonical.stream:
+            return None
+        # Gemini carries the model in the URL; if we couldn't determine it (a non-standard path),
+        # caching would fold distinct models onto the same key and risk serving one model's answer
+        # for another. Fail open: don't cache such a request (it still forwards + compresses).
+        if canonical.dialect is Dialect.GEMINI and canonical.model is None:
             return None
         try:
             # The secret check is inside the try so a misbehaving redactor fails *closed* for
