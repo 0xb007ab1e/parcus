@@ -90,6 +90,7 @@ def _engine(upstream: FakeUpstream, **kw: object) -> ProxyEngine:
         config=EngineConfig(
             anthropic_upstream="https://a.test",
             openai_upstream="https://o.test",
+            gemini_upstream="https://g.test",
             cache_enabled=bool(kw.get("cache_enabled", True)),
             cache_inject=bool(kw.get("cache_inject", False)),
             cache_inject_repeat_aware=bool(kw.get("cache_inject_repeat_aware", True)),
@@ -351,6 +352,54 @@ class TestCacheInjection:
         await eng.handle("POST", "/v1/chat/completions", [("authorization", "Bearer k")], body)
         sent = json.loads(up.last.content)
         assert sent["messages"][0]["content"] == "a"  # OpenAI = automatic-prefix → no injection
+
+
+def _gemini(text: str, *, model: str = "gemini-2.5-flash") -> tuple[str, bytes]:
+    """Return a (path, body) pair for a single-user-turn Gemini generateContent request."""
+    path = f"/v1beta/models/{model}:generateContent"
+    body = json.dumps({"contents": [{"role": "user", "parts": [{"text": text}]}]}).encode()
+    return path, body
+
+
+class TestGeminiRouting:
+    async def test_routed_to_gemini_upstream_and_compressed(self) -> None:
+        up = FakeUpstream()
+        eng = _engine(up, cache_enabled=False)
+        path, body = _gemini("hi   \n\n\n\n\nthere")
+        await eng.handle("POST", path, [("x-goog-api-key", "k")], body)
+        assert up.last is not None
+        assert up.last.url == "https://g.test/v1beta/models/gemini-2.5-flash:generateContent"
+        sent = json.loads(up.last.content)
+        assert sent["contents"][0]["parts"][0]["text"] == "hi\n\nthere"  # whitespace compressed
+
+    async def test_routed_by_x_goog_api_key_header_on_unknown_path(self) -> None:
+        # Even if the path weren't recognised, the Gemini credential header routes it.
+        up = FakeUpstream()
+        eng = _engine(up)
+        assert eng.route(Dialect.GEMINI, []) == "https://g.test"
+        assert eng.route(Dialect.UNKNOWN, [("x-goog-api-key", "k")]) == "https://g.test"
+
+    async def test_model_from_path_isolates_the_cache(self) -> None:
+        # Identical body, different model in the URL → different cache keys → no cross-model hit.
+        up = FakeUpstream()
+        eng = _engine(up, cache=SqliteCache())
+        _, body = _gemini("same question")
+        flash = "/v1beta/models/gemini-2.5-flash:generateContent"
+        pro = "/v1beta/models/gemini-2.5-pro:generateContent"
+        await eng.handle("POST", flash, [("x-goog-api-key", "k")], body)
+        await eng.handle("POST", pro, [("x-goog-api-key", "k")], body)
+        assert up.calls == 2  # the pro request was NOT served from the flash cache
+
+    async def test_same_model_still_caches(self) -> None:
+        # Control for the isolation test: identical model + body does hit the cache.
+        up = FakeUpstream()
+        eng = _engine(up, cache=SqliteCache())
+        path, body = _gemini("same question")
+        first = await eng.handle("POST", path, [("x-goog-api-key", "k")], body)
+        second = await eng.handle("POST", path, [("x-goog-api-key", "k")], body)
+        assert first.meta["cache"] == "miss"
+        assert second.meta["cache"] == "hit"
+        assert up.calls == 1
 
 
 class TestQueryPreservation:

@@ -49,6 +49,7 @@ class Settings(BaseSettings):
 
     anthropic_upstream: str = "https://api.anthropic.com"
     openai_upstream: str = "https://api.openai.com"
+    gemini_upstream: str = "https://generativelanguage.googleapis.com"
 
     lossless: bool = True
     filler: bool = False
