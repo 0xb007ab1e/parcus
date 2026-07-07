@@ -177,3 +177,45 @@ It surfaced one decision that is cheapest to make now, while the port has no cal
 **Status stays `Proposed`** until the wiring slice (Gemini request routing — detect
 `generateContent` → parse → serialise a `cachedContent` reference — plus engine integration and a
 live-key validation) lands and flips it to `Accepted`.
+
+## Update (2026-07-07): the registrar is credential-scoped (supersedes Decision 3 & §7 wording)
+
+Building the registrar surfaced two facts that **correct** the earlier design. Gemini routing has
+landed (#89); Gemini traffic now flows through compression + the exact/similarity cache. The
+context-cache registrar was then reworked (#87 made it async; this rework makes it
+credential-scoped) before any engine wiring.
+
+**Decision — per-request caller credential (supersedes "static factory `api_key`").** A
+`cachedContents` handle is only valid for the **key/project that created it**, and a provider-blind
+proxy owns no key — it forwards the *caller's* `x-goog-api-key`. So `create` runs under the
+**caller's** credential, passed per request: `ensure(prefix, *, model, credential)`, and
+`gemini_registrar` builds a client from that credential per `create` call (no client/key caching).
+The raw key is used transiently and is **never stored in a handle or logged** (crown-jewels rule).
+This also means the proxy now *acts with* the caller's credential (creates billable cache resources
+under their project), not merely forwards it — a deliberate, **opt-in + spend-capped** escalation.
+
+**Decision — fingerprint-scope handles by credential (supersedes "tenant-scoped").** Keying by
+`(tenant, model, prefix)` is unsafe: in single-tenant mode `tenant` is empty, so two different
+callers' keys would share a handle and the second caller would reference a cache it doesn't own —
+Gemini would reject it and the *request would break* (not fail-open). Handles are therefore keyed
+by `(sha256(credential), model, sha256(prefix))`, correct in both tenant modes.
+
+**Decision — no remote delete; rely on the provider TTL.** A background `evict_expired()` has no
+caller credential, so it cannot delete remotely. It prunes the **local** map only; the remote cache
+lapses on Gemini's own TTL (our tracked TTL is `<=` it). `ensure` also opportunistically prunes so
+the map stays bounded without a scheduler (closes the earlier finding #1). Trade-off: a
+dropped-but-unexpired remote cache lingers until the provider TTL; the spend cap bounds concurrent
+*creates*, which is the money-relevant quantity.
+
+**Clarification — §7 is a secret *bypass*, not content redaction.** You cannot redact the cached
+prefix without corrupting the prompt (the model must see the real content, which is sent inline
+anyway). The correct control — matching the exact cache's secret bypass — is: **if the prefix
+contains a detectable secret, do not register a context cache for it** (fail open → inline send), so
+secrets get no extended server-side retention. The engine-wiring slice implements this as a
+`has_secret` check before `ensure`.
+
+Still **`Proposed`**: the remaining engine-wiring slice (invoke the registrar in
+`_handle`/`prepare_stream` with the `has_secret` bypass and the min-prefix/boundary gate; serialise
+the `cachedContent` reference with tail-only `contents`; add `context_cache` to the 100%-critical
+set) plus a **live-key validation** are required before `Accepted` — the create→reference→discount
+round-trip is not verifiable in hermetic CI.
