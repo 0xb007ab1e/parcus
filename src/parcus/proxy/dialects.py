@@ -31,7 +31,6 @@ _OPENAI_ROLES = frozenset({Role.SYSTEM, Role.USER, Role.ASSISTANT})
 # Gemini uses ``user``/``model`` in ``contents`` (not ``assistant``); map both ways.
 _GEMINI_TO_ROLE = {"user": Role.USER, "model": Role.ASSISTANT}
 _ROLE_TO_GEMINI = {Role.USER: "user", Role.ASSISTANT: "model"}
-_GEMINI_MODELS_MARKER = "/models/"
 
 
 def detect(path: str) -> Dialect:
@@ -46,18 +45,19 @@ def detect(path: str) -> Dialect:
 
 
 def gemini_model_from_path(path: str) -> str | None:
-    """Extract the model id from a Gemini path, or ``None`` if it isn't the standard shape.
+    """Extract the model id from a Gemini path, or ``None`` if it can't be determined.
 
-    Gemini puts the model in the URL, not the body (e.g.
-    ``/v1beta/models/gemini-2.5-flash:generateContent``). The engine folds it into
-    :attr:`~parcus.model.CanonicalRequest.model` so two models don't collide in the cache key.
-    Returns ``None`` for a non-standard path (e.g. tuned models); the caller then keys on ``None``.
+    Gemini puts the model in the URL, not the body — it is the **last path segment before the
+    ``:method`` suffix**, which covers both base models
+    (``/v1beta/models/gemini-2.5-flash:generateContent``) and tuned models
+    (``/v1beta/tunedModels/my-model:generateContent``). The engine folds this into
+    :attr:`~parcus.model.CanonicalRequest.model` so two models never collide in the cache key.
+    Returns ``None`` for a pathological path (no ``:method`` suffix, or an empty model segment); the
+    engine then declines to cache the request rather than risk a cross-model hit (fail open).
     """
-    idx = path.rfind(_GEMINI_MODELS_MARKER)
-    if idx == -1:
-        return None
-    model, sep, _method = path[idx + len(_GEMINI_MODELS_MARKER) :].partition(":")
-    if not sep or not model:
+    _prefix, _slash, segment = path.rpartition("/")
+    model, sep, method = segment.partition(":")
+    if not sep or not model or not method:
         return None
     return model
 

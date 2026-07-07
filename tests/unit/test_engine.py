@@ -401,6 +401,31 @@ class TestGeminiRouting:
         assert second.meta["cache"] == "hit"
         assert up.calls == 1
 
+    async def test_tuned_models_are_isolated_in_cache(self) -> None:
+        # Distinct tuned models (under /tunedModels/) with an identical body must not collide.
+        up = FakeUpstream()
+        eng = _engine(up, cache=SqliteCache())
+        _, body = _gemini("same question")
+        await eng.handle(
+            "POST", "/v1beta/tunedModels/aaa:generateContent", [("x-goog-api-key", "k")], body
+        )
+        await eng.handle(
+            "POST", "/v1beta/tunedModels/bbb:generateContent", [("x-goog-api-key", "k")], body
+        )
+        assert up.calls == 2  # tuned model ids isolate the cache key
+
+    async def test_indeterminate_model_is_not_cached(self) -> None:
+        # A Gemini path with no determinable model must not be cached at all — folding distinct
+        # models onto a None key would risk serving one model's answer for another (fail open).
+        up = FakeUpstream()
+        eng = _engine(up, cache=SqliteCache())
+        _, body = _gemini("q")
+        path = "/v1beta/models/:generateContent"  # empty model segment → model is None
+        first = await eng.handle("POST", path, [("x-goog-api-key", "k")], body)
+        await eng.handle("POST", path, [("x-goog-api-key", "k")], body)
+        assert first.meta["cache"] == "off"  # not cacheable → never stored
+        assert up.calls == 2  # so the second request is not served from a (None-keyed) entry
+
 
 class TestQueryPreservation:
     """The request query string is forwarded verbatim (e.g. Gemini's ``?alt=sse``)."""

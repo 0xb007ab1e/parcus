@@ -34,7 +34,11 @@ class TestGeminiModelFromPath:
             "gemini-2.5-pro"
         )
 
-    def test_no_models_marker(self) -> None:
+    def test_extracts_tuned_model(self) -> None:
+        # Tuned models live under /tunedModels/, not /models/ — must still isolate by id.
+        assert gemini_model_from_path("/v1beta/tunedModels/my-model:generateContent") == "my-model"
+
+    def test_no_colon_method(self) -> None:
         assert gemini_model_from_path("/v1/messages") is None
 
     def test_no_method_suffix(self) -> None:

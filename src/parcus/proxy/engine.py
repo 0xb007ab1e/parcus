@@ -624,6 +624,11 @@ class ProxyEngine:
     def _maybe_cache_key(self, canonical: CanonicalRequest, tenant: str = "") -> str | None:
         if not self._config.cache_enabled or canonical.stream:
             return None
+        # Gemini carries the model in the URL; if we couldn't determine it (a non-standard path),
+        # caching would fold distinct models onto the same key and risk serving one model's answer
+        # for another. Fail open: don't cache such a request (it still forwards + compresses).
+        if canonical.dialect is Dialect.GEMINI and canonical.model is None:
+            return None
         try:
             # The secret check is inside the try so a misbehaving redactor fails *closed* for
             # caching (no key -> not cached) while the request still forwards (fails open).
