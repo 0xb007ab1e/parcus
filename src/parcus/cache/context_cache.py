@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from parcus.model import ContextCacheHandle
 from parcus.ports import ClockPort
@@ -48,13 +48,13 @@ class NullContextCacheRegistrar:
     default rather than a matter of discipline.
     """
 
-    def ensure(
+    async def ensure(
         self, prefix: str, *, model: str | None, tenant: str = ""
     ) -> ContextCacheHandle | None:
         """Return ``None`` — nothing is cached, so the caller forwards the prefix inline."""
         return None
 
-    def evict_expired(self) -> None:
+    async def evict_expired(self) -> None:
         """Do nothing — there is no state to evict."""
         return None
 
@@ -73,9 +73,9 @@ class GeminiContextCacheRegistrar:
         ttl_seconds: How long a freshly-created handle is considered live (``<=`` the provider TTL).
         max_entries: Spend cap — the maximum number of concurrently *live* provider caches. At the
             cap, a miss fails open instead of registering another paid resource.
-        create: Injected I/O — register ``prefix`` for ``model`` with the provider, returning the
-            opaque resource name. May raise; the caller catches and fails open.
-        delete: Injected I/O — delete a provider cache by resource name. May raise; ignored.
+        create: Injected async I/O — register ``prefix`` for ``model`` with the provider, returning
+            the opaque resource name. May raise; the caller catches and fails open.
+        delete: Injected async I/O — delete a provider cache by resource name. May raise; ignored.
     """
 
     def __init__(
@@ -84,8 +84,8 @@ class GeminiContextCacheRegistrar:
         clock: ClockPort,
         ttl_seconds: int,
         max_entries: int,
-        create: Callable[[str, str | None], str],
-        delete: Callable[[str], None],
+        create: Callable[[str, str | None], Awaitable[str]],
+        delete: Callable[[str], Awaitable[None]],
     ) -> None:
         """Store the injected clock, TTL/cap policy, and provider create/delete I/O callables."""
         self._clock = clock
@@ -105,7 +105,7 @@ class GeminiContextCacheRegistrar:
         """Number of currently non-expired handles (what the spend cap bounds)."""
         return sum(1 for h in self._handles.values() if not h.is_expired(now))
 
-    def ensure(
+    async def ensure(
         self, prefix: str, *, model: str | None, tenant: str = ""
     ) -> ContextCacheHandle | None:
         """Return a live handle for ``prefix``, creating one if useful; ``None`` ⇒ send inline."""
@@ -119,7 +119,7 @@ class GeminiContextCacheRegistrar:
             self._handles.pop(key, None)
             if self._live_count(now) >= self._max_entries:
                 return None  # spend cap reached — don't pay for another cache
-            name = self._create(prefix, model)
+            name = await self._create(prefix, model)
             handle = ContextCacheHandle(
                 name=name, model=model or "", expires_at=now + self._ttl_seconds
             )
@@ -128,7 +128,7 @@ class GeminiContextCacheRegistrar:
         except Exception:
             return None  # fail open: any error ⇒ forward the prefix inline
 
-    def evict_expired(self) -> None:
+    async def evict_expired(self) -> None:
         """Delete every handle whose tracked TTL has lapsed; per-handle delete errors are ignored.
 
         Provider deletion is best-effort — a failed delete leaves a paid resource to lapse on the
@@ -139,7 +139,7 @@ class GeminiContextCacheRegistrar:
             if handle.is_expired(now):
                 self._handles.pop(key, None)
                 with contextlib.suppress(Exception):
-                    self._delete(handle.name)
+                    await self._delete(handle.name)
 
 
 def gemini_registrar(
@@ -157,15 +157,15 @@ def gemini_registrar(
 
     client = genai.Client(api_key=api_key)
 
-    def create(prefix: str, model: str | None) -> str:
-        cached = client.caches.create(
+    async def create(prefix: str, model: str | None) -> str:
+        cached = await client.aio.caches.create(
             model=model or "gemini-2.5-flash",
             config={"contents": prefix},
         )
         return str(cached.name)
 
-    def delete(name: str) -> None:
-        client.caches.delete(name=name)
+    async def delete(name: str) -> None:
+        await client.aio.caches.delete(name=name)
 
     return GeminiContextCacheRegistrar(
         clock=clock,

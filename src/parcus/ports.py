@@ -161,9 +161,14 @@ class ContextCacheRegistrar(Protocol):
     prefix)`` so a cache is never shared across tenants or models (a handle is only valid for the
     credential/project that created it). Since this changes only billing/transport and never
     request or response content, it needs no answer-preservation gate.
+
+    The methods are **async**: the engine forward path is async and the provider client does
+    network I/O, so a registrar call must not block the event loop. Staying on the loop (rather
+    than a threadpool) also keeps the handle state single-tasked and lock-free. See
+    ``docs/adr/0010-gemini-context-cache-adapter.md`` (Update 2026-07-04).
     """
 
-    def ensure(
+    async def ensure(
         self, prefix: str, *, model: str | None, tenant: str = ""
     ) -> ContextCacheHandle | None:
         """Return a live handle for ``prefix`` under ``(tenant, model)``, creating one if useful.
@@ -174,7 +179,7 @@ class ContextCacheRegistrar(Protocol):
         """
         ...
 
-    def evict_expired(self) -> None:
+    async def evict_expired(self) -> None:
         """Delete provider caches whose tracked TTL has lapsed to bound cost; never raises."""
         ...
 
